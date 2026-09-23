@@ -1,0 +1,5 @@
+- Annotations are contained in "ExtremeLabels.csv". 
+- There are 8 folders in both "Videos" and "Audio" for the 8 challenging vision conditions. 
+- "repetition_start_frame" and "repetition_end_frame" denote the segment contains repetitions in each video. 
+- "start_crop_frame" and "end_crop_frame" denote the position we crop from the original video and in our construction, we include some temporal contexts. 
+- The first 158 videos are from the Countix dataset and the rest come from VGGSound. For some videos, we set the repetition_stop_frame to -1, which means we use the whole video. 

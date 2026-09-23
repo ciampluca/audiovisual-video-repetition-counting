@@ -1,0 +1,70 @@
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.hypothesis/
+
+# Python environments
+.venv/
+venv/
+env/
+ENV/
+.conda/
+
+# Python packaging and builds
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment variables and local secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.cache/
+
+# Node dependencies, if present
+node_modules/
+
+# Local archived or generated project copies
+/old/
+/orig_repo/
+/copilot_created/
+/old orig_repo copilot_created/
+
+# Large media/export directories anywhere below data/.
+# Other files and directories inside data/ remain trackable.
+/data/**/audios/
+/data/**/videos/
+/data/**/kanvas_export/
