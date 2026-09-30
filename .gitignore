@@ -67,4 +67,4 @@ node_modules/
 # Other files and directories inside data/ remain trackable.
 /data/**/audios/
 /data/**/videos/
-/data/**/kanvas_export/
+/data/**/canva_exports/
