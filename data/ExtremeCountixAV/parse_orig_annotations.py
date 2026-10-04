@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+
 """Convert the original ExtremeCountixAV test annotations to a dense format.
 
+
+
 The script only parses annotations: it never crops, renames, or modifies videos.
+
 FPS values are read from the corresponding files in the local videos directory.
+
 """
 
 from __future__ import annotations
@@ -18,10 +23,11 @@ from pathlib import Path
 from typing import Iterable
 
 
-DEFAULT_INPUT = Path("orig_anns/ExtremeCountixAV_test.csv")
-DEFAULT_VIDEOS_DIR = Path("videos")
-DEFAULT_OUTPUT = Path("annotations/ExtremeCountixAV_test_parsed.csv")
-DEFAULT_FAILURES = Path("ExtremeCountixAV_test_parse_failures.csv")
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_INPUT = SCRIPT_DIR / "orig_anns/ExtremeCountixAV_test.csv"
+DEFAULT_VIDEOS_DIR = SCRIPT_DIR / "videos"
+DEFAULT_OUTPUT = SCRIPT_DIR / "annotations/ExtremeCountixAV_test.csv"
+DEFAULT_FAILURES = SCRIPT_DIR / "ExtremeCountixAV_test_parse_failures.csv"
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v")
 
 
@@ -104,7 +110,11 @@ def build_video_index(videos_dir: Path, recursive: bool) -> dict[str, list[Path]
 def find_video(youtube_id: str, index: dict[str, list[Path]]) -> Path:
     """Match the full youtube_id stem; do not convert it to a Kinetics name."""
     source_name = Path(youtube_id).name
-    stem = Path(source_name).stem if Path(source_name).suffix.lower() in VIDEO_EXTENSIONS else source_name
+    stem = (
+        Path(source_name).stem
+        if Path(source_name).suffix.lower() in VIDEO_EXTENSIONS
+        else source_name
+    )
     matches = index.get(stem, [])
     if not matches:
         raise FileNotFoundError(f"No video with stem {stem!r} was found")
@@ -221,7 +231,9 @@ def uniform_boundaries(start_frame: int, end_frame: int, count: int) -> list[int
     return boundaries
 
 
-def format_number(value: float, decimals: int = 6, keep_one_decimal: bool = False) -> str:
+def format_number(
+    value: float, decimals: int = 6, keep_one_decimal: bool = False
+) -> str:
     text = f"{value:.{decimals}f}".rstrip("0").rstrip(".")
     text = text if text else "0"
     if keep_one_decimal and "." not in text:
@@ -239,8 +251,6 @@ def output_columns(max_repetitions: int) -> list[str]:
         "repetition_segment_end_sec",
         "repetition_segment_start_frame",
         "repetition_segment_end_frame",
-        "start_crop_frame",
-        "end_crop_frame",
     ]
     for rep_index in range(1, max_repetitions + 1):
         columns.extend(
@@ -316,9 +326,8 @@ def convert_row(
                 "start_crop_frame must be non-negative for a bounded repetition segment"
             )
         if source_repetition_start < crop_start:
-            raise ValueError(
-                "repetition_start_frame precedes start_crop_frame"
-            )
+            raise ValueError("repetition_start_frame precedes start_crop_frame")
+
         # Extreme CountixAV annotations refer to the original video. Local
         # videos begin at start_crop_frame, so every output frame coordinate
         # must be expressed relative to that crop origin.
@@ -354,10 +363,12 @@ def convert_row(
     boundaries = uniform_boundaries(repetition_start, repetition_end, count)
 
     converted: dict[str, object] = {
-        # Keep the original stem and only use the extension of the matching local file.
-        "video_name": f"{youtube_id}{video_path.suffix}"
-        if not Path(youtube_id).suffix.lower() in VIDEO_EXTENSIONS
-        else youtube_id,
+        # Keep the original stem and only use the extension of the matching file.
+        "video_name": (
+            f"{youtube_id}{video_path.suffix}"
+            if not Path(youtube_id).suffix.lower() in VIDEO_EXTENSIONS
+            else youtube_id
+        ),
         "count": format_number(float(count), 1, keep_one_decimal=True),
         "class": action_class,
         "fps": format_number(fps, 6),
@@ -369,8 +380,6 @@ def convert_row(
         ),
         "repetition_segment_start_frame": repetition_start,
         "repetition_segment_end_frame": repetition_end,
-        "start_crop_frame": crop_start,
-        "end_crop_frame": crop_end,
     }
 
     for rep_index in range(1, max_repetitions + 1):
@@ -417,7 +426,6 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
-
         source_rows = list(reader)
 
     try:
@@ -456,7 +464,9 @@ def main() -> int:
         writer.writerows(converted_rows)
 
     args.failures_csv.parent.mkdir(parents=True, exist_ok=True)
-    with args.failures_csv.open("w", encoding="utf-8", newline="") as destination:
+    with args.failures_csv.open(
+        "w", encoding="utf-8", newline=""
+    ) as destination:
         writer = csv.DictWriter(
             destination, fieldnames=["row_number", "youtube_id", "reason"]
         )

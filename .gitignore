@@ -70,3 +70,4 @@ node_modules/
 /data/**/canva_exports/
 /data/**/visual_exemplars/
 /data/**/intermediate_kinetics_videos/
+/data/**/intermediate_ego4d_videos/

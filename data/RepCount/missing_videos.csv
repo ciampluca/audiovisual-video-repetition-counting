@@ -1,0 +1,4 @@
+split,video_name,reason
+train,stu6_44.mp4,Annotation check failed: No L_i repetition frames found
+val,stu9_67.mp4,Annotation check failed: No L_i repetition frames found
+test,train143.mp4,Annotation check failed: No L_i repetition frames found

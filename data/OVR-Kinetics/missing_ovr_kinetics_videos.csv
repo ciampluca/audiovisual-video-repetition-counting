@@ -1,0 +1,4 @@
+split,csv_file,csv_row,video_id,class,matches_found,candidates,reason,details
+test,ovr_kinetics_test.csv,4679,LoWxj8-oLYs.mp4,unknown,1,/mnt/Workspace/audiovisual-video-repetition-counting/kinetics_videos/LoWxj8-oLYs.mp4,invalid_annotation,repetition pair 4 ends before it starts
+test,ovr_kinetics_test.csv,4680,LoWxj8-oLYs.mp4,unknown,1,/mnt/Workspace/audiovisual-video-repetition-counting/kinetics_videos/LoWxj8-oLYs.mp4,invalid_annotation,repetition pair 4 ends before it starts
+test,ovr_kinetics_test.csv,4850,3VdWCZW1O2A.mp4,unknown,1,/mnt/Workspace/audiovisual-video-repetition-counting/kinetics_videos/3VdWCZW1O2A.mp4,invalid_annotation,repetition pair 25 ends before it starts
