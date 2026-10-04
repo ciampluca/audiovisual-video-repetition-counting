@@ -68,3 +68,5 @@ node_modules/
 /data/**/audios/
 /data/**/videos/
 /data/**/canva_exports/
+/data/**/visual_exemplars/
+/data/**/intermediate_kinetics_videos/
