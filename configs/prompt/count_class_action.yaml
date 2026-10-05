@@ -1,0 +1,5 @@
+name: Count Class Action
+slug: count-class-action
+context_fields:
+  - class_name
+text: 'The target action class is "{class_name}". Watch the entire video and count the complete repetitions of this action across the video. Count each complete repetition once and ignore other actions. Determine the count from visible motion; do not infer it from the class name. If the target action is not visible, return a count of 0. Return exactly one JSON object with exactly these fields: "count" (a non-negative integer), "action_description" (a short description of the target action as it appears in the video), and "reasoning" (one concise sentence describing visible motion evidence for the count). Do not include markdown or any text outside the JSON object.'

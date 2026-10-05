@@ -2,8 +2,10 @@
 
 This benchmark evaluates video-capable LVLMs on the Countix, RepCount, UCFRep,
 OVR-Kinetics, and OVR-Ego4d annotations. It does not train or fine-tune models.
-Only video is sampled and sent to the model. Annotation counts are used only for
-scoring; action classes and descriptions are not included in requests.
+The existing prompts use sampled video and do not include annotation metadata.
+The optional `count-class-action` prompt also sends the row's `class` value as
+text context. Annotation counts are used only for scoring; descriptions and
+other annotation columns are not sent to the model.
 
 ## Setup
 
@@ -54,12 +56,23 @@ Select another dataset, model, or prompt with Hydra config groups:
 video-repetition-benchmark dataset=ucfrep model=internvl3_9b prompt=count_complete_cycles
 ```
 
+Use the class-conditioned prompt with a dataset whose selected annotation CSV
+contains a valid `class` value for every row:
+
+```bash
+video-repetition-benchmark dataset=ucfrep prompt=count_class_action
+```
+
+The class-conditioned run is skipped before inference if the selected CSV has
+no `class` column or contains a blank or `unknown` class value. No other CSV
+column is used as prompt context.
+
 Run a dataset/prompt/FPS sweep against the model currently loaded by vLLM:
 
 ```bash
 video-repetition-benchmark --multirun \
   dataset=countix,repcount,ucfrep,ovr_kinetics,ovr_ego4d \
-  prompt=count_repetitions,count_complete_cycles,count_full_video \
+  prompt=count_repetitions,count_complete_cycles,count_full_video,count_class_action \
   sampling.fps=0.5,1,2
 ```
 

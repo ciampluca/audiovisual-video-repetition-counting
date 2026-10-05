@@ -14,6 +14,7 @@ class Annotation:
     video_path: Path
     gt_count: float
     annotation_split: str
+    class_name: str | None = None
 
 
 def select_annotation_csv(dataset_dir: Path, annotation_prefix: str) -> tuple[Path, str]:
@@ -71,6 +72,7 @@ def load_annotations(
                     video_path=video_dir / video_name,
                     gt_count=gt_count,
                     annotation_split=split,
+                    class_name=(row.get("class") or "").strip() or None,
                 )
             )
 

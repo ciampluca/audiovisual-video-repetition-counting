@@ -12,11 +12,16 @@ from tqdm import tqdm
 from lvlm_video_repetition_benchmark.datasets import Annotation, load_annotations
 from lvlm_video_repetition_benchmark.metrics import compute_metrics
 from lvlm_video_repetition_benchmark.parsing import parse_response
+from lvlm_video_repetition_benchmark.prompting import PromptContextError, render_prompt
 from lvlm_video_repetition_benchmark.video import VideoSample, sample_video
 from lvlm_video_repetition_benchmark.vllm_client import VLLMVideoClient
 
 
 logger = logging.getLogger(__name__)
+
+
+class DatasetSkippedError(RuntimeError):
+    pass
 
 
 PREDICTION_COLUMNS = [
@@ -25,6 +30,7 @@ PREDICTION_COLUMNS = [
     "annotation_id",
     "annotation_row",
     "video_name",
+    "class_name",
     "video_path",
     "gt_count",
     "pred_count",
@@ -95,6 +101,7 @@ def _result_record(
         "annotation_id": annotation.annotation_id,
         "annotation_row": annotation.annotation_row,
         "video_name": annotation.video_name,
+        "class_name": annotation.class_name,
         "video_path": str(annotation.video_path),
         "gt_count": annotation.gt_count,
         "pred_count": None,
@@ -235,6 +242,30 @@ def run_benchmark(
         str(cfg.dataset.slug),
         str(cfg.dataset.annotation_prefix),
     )
+    configured_context_fields = getattr(cfg.prompt, "context_fields", ()) or ()
+    if isinstance(configured_context_fields, str):
+        configured_context_fields = (configured_context_fields,)
+    context_fields = tuple(str(field) for field in configured_context_fields)
+    if context_fields and not annotations:
+        raise DatasetSkippedError(
+            f"Dataset {cfg.dataset.name!r} skipped for prompt {cfg.prompt.slug!r}: "
+            f"selected annotation file {annotation_csv} contains no rows for the "
+            "required prompt context."
+        )
+    try:
+        prompts = {
+            annotation.annotation_id: render_prompt(
+                str(cfg.prompt.text), annotation, context_fields
+            )
+            for annotation in annotations
+        }
+    except PromptContextError as exc:
+        raise DatasetSkippedError(
+            f"Dataset {cfg.dataset.name!r} skipped for prompt {cfg.prompt.slug!r}: "
+            f"selected annotation file {annotation_csv} has missing or invalid "
+            f"required class context ({exc})."
+        ) from exc
+
     output_dir = (
         Path(cfg.paths.output_root).resolve()
         / str(cfg.dataset.slug)
@@ -303,7 +334,7 @@ def run_benchmark(
                     raw_response = _generate_with_retries(
                         client,
                         video=video_sample,
-                        prompt=str(cfg.prompt.text),
+                        prompt=prompts[annotation.annotation_id],
                         seed=seed,
                         temperature=temperature,
                         max_tokens=int(cfg.generation.max_tokens),

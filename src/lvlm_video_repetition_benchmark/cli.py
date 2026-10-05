@@ -6,7 +6,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig
 
-from lvlm_video_repetition_benchmark.runner import run_benchmark
+from lvlm_video_repetition_benchmark.runner import DatasetSkippedError, run_benchmark
 
 
 @hydra.main(
@@ -16,4 +16,7 @@ from lvlm_video_repetition_benchmark.runner import run_benchmark
 )
 def main(cfg: DictConfig) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    run_benchmark(cfg)
+    try:
+        run_benchmark(cfg)
+    except DatasetSkippedError as exc:
+        logging.getLogger(__name__).warning("%s", exc)
