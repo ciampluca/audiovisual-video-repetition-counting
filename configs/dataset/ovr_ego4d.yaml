@@ -1,0 +1,4 @@
+name: OVR-Ego4d
+slug: ovr-ego4d
+folder: OVR-Ego4d
+annotation_prefix: ovr_ego4d

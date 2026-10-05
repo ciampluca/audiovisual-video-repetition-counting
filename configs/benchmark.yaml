@@ -1,0 +1,33 @@
+defaults:
+  - dataset: countix
+  - model: qwen3_vl_8b
+  - prompt: count_repetitions
+  - _self_
+
+paths:
+  workspace_root: ${hydra:runtime.cwd}
+  output_root: ${paths.workspace_root}/results
+
+runtime:
+  base_url: http://localhost:8000/v1
+  api_key: EMPTY
+  timeout_seconds: 600
+  max_retries: 2
+  retry_backoff_seconds: 1.0
+
+benchmark:
+  seeds: [13, 17, 23, 42, 99]
+
+sampling:
+  fps: 1.0
+  max_frames: 3000
+
+generation:
+  temperature: 0.2
+  max_tokens: 128
+
+hydra:
+  run:
+    dir: ${paths.workspace_root}/.hydra_runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: false

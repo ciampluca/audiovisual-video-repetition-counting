@@ -1,0 +1,4 @@
+name: LLaVA-OneVision-Qwen2-7B
+slug: llava-onevision-qwen2-7b
+hf_id: llava-hf/llava-onevision-qwen2-7b-ov-hf
+served_name: llava-onevision-qwen2-7b

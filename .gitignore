@@ -71,3 +71,4 @@ node_modules/
 /data/**/visual_exemplars/
 /data/**/intermediate_kinetics_videos/
 /data/**/intermediate_ego4d_videos/
+/tests/
