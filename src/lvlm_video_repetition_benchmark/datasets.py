@@ -15,6 +15,7 @@ class Annotation:
     gt_count: float
     annotation_split: str
     class_name: str | None = None
+    description: str | None = None
 
 
 def select_annotation_csv(dataset_dir: Path, annotation_prefix: str) -> tuple[Path, str]:
@@ -73,6 +74,7 @@ def load_annotations(
                     gt_count=gt_count,
                     annotation_split=split,
                     class_name=(row.get("class") or "").strip() or None,
+                    description=(row.get("description") or "").strip() or None,
                 )
             )
 

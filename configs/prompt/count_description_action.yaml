@@ -1,0 +1,5 @@
+name: Count Description Action
+slug: count-description-action
+context_fields:
+  - description
+text: 'Count the number of complete visible repetitions of the target action in the video. The target action description is: "{description}". Use the description only to identify which action to count. Base the count on visible evidence in the video; do not infer it from the wording or assume the description gives the correct count. Count each complete repetition once and ignore other actions. If the target action is not visible, return a count of 0. Return exactly one JSON object with exactly these fields: "count" (a non-negative integer), "action_description" (a short description of the target action as it appears in the video), and "reasoning" (one concise sentence grounded in visible motion). Do not include markdown or any text outside the JSON object.'

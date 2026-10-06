@@ -16,6 +16,7 @@ from lvlm_video_repetition_benchmark.runner import DatasetSkippedError, run_benc
 )
 def main(cfg: DictConfig) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpx2").setLevel(logging.WARNING)
     try:
         run_benchmark(cfg)
     except DatasetSkippedError as exc:

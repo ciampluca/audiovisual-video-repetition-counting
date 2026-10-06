@@ -3,9 +3,10 @@
 This benchmark evaluates video-capable LVLMs on the Countix, RepCount, UCFRep,
 OVR-Kinetics, and OVR-Ego4d annotations. It does not train or fine-tune models.
 The existing prompts use sampled video and do not include annotation metadata.
-The optional `count-class-action` prompt also sends the row's `class` value as
-text context. Annotation counts are used only for scoring; descriptions and
-other annotation columns are not sent to the model.
+The optional `count-class-action` prompt sends the row's `class` value as text
+context, and `count-description-action` sends its `description` value. These
+prompts use only their named context field. Annotation counts are used only for
+scoring; other annotation columns are not sent to the model.
 
 ## Setup
 
@@ -64,15 +65,27 @@ video-repetition-benchmark dataset=ucfrep prompt=count_class_action
 ```
 
 The class-conditioned run is skipped before inference if the selected CSV has
-no `class` column or contains a blank or `unknown` class value. No other CSV
-column is used as prompt context.
+no `class` column or contains a blank or `unknown` class value. That prompt uses
+only the `class` column as context.
+
+Use the description-conditioned prompt with annotations that provide a valid
+description for every row, such as OVR-Kinetics or OVR-Ego4d:
+
+```bash
+video-repetition-benchmark dataset=ovr_kinetics prompt=count_description_action
+```
+
+The description-conditioned run is skipped before inference if the selected
+CSV has no `description` column or any row contains a blank or `unknown`
+description. The description identifies the action; the count must be based on
+visible video evidence, not inferred from the text.
 
 Run a dataset/prompt/FPS sweep against the model currently loaded by vLLM:
 
 ```bash
 video-repetition-benchmark --multirun \
   dataset=countix,repcount,ucfrep,ovr_kinetics,ovr_ego4d \
-  prompt=count_repetitions,count_complete_cycles,count_full_video,count_class_action \
+  prompt=count_repetitions,count_complete_cycles,count_full_video,count_class_action,count_description_action \
   sampling.fps=0.5,1,2
 ```
 
@@ -107,8 +120,9 @@ results/{dataset}/{model}/video-only/{prompt}/fps-{fps}/temperature-{temperature
 ```
 
 `predictions.csv` contains one record per annotation row and seed, including the
-raw response, parsed count, action description, concise motion reasoning,
-signed/absolute/relative error, FPS, temperature, and status.
+source `class_name` and `description` when present, raw response, parsed count,
+action description, concise motion reasoning, signed/absolute/relative error,
+FPS, temperature, and status.
 
 - `mae_percent`: the *Every Shot Counts* MAE, computed as the mean per-row
   absolute error divided by that row's positive ground-truth count, expressed

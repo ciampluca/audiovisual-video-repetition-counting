@@ -31,6 +31,7 @@ PREDICTION_COLUMNS = [
     "annotation_row",
     "video_name",
     "class_name",
+    "description",
     "video_path",
     "gt_count",
     "pred_count",
@@ -102,6 +103,7 @@ def _result_record(
         "annotation_row": annotation.annotation_row,
         "video_name": annotation.video_name,
         "class_name": annotation.class_name,
+        "description": annotation.description,
         "video_path": str(annotation.video_path),
         "gt_count": annotation.gt_count,
         "pred_count": None,
@@ -250,7 +252,7 @@ def run_benchmark(
         raise DatasetSkippedError(
             f"Dataset {cfg.dataset.name!r} skipped for prompt {cfg.prompt.slug!r}: "
             f"selected annotation file {annotation_csv} contains no rows for the "
-            "required prompt context."
+            f"required prompt context fields {', '.join(context_fields)}."
         )
     try:
         prompts = {
@@ -263,7 +265,7 @@ def run_benchmark(
         raise DatasetSkippedError(
             f"Dataset {cfg.dataset.name!r} skipped for prompt {cfg.prompt.slug!r}: "
             f"selected annotation file {annotation_csv} has missing or invalid "
-            f"required class context ({exc})."
+            f"required prompt context ({exc})."
         ) from exc
 
     output_dir = (
