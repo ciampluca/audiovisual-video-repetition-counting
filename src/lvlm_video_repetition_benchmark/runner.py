@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import logging
 import math
 from pathlib import Path
@@ -232,10 +234,15 @@ def run_benchmark(
     runtime_cfg = getattr(cfg, "runtime", None)
     max_retries = int(getattr(runtime_cfg, "max_retries", 2))
     retry_backoff_seconds = float(getattr(runtime_cfg, "retry_backoff_seconds", 1.0))
+    max_concurrent_requests = int(
+        getattr(runtime_cfg, "max_concurrent_requests", 1)
+    )
     if max_retries < 0:
         raise ValueError("runtime.max_retries must be non-negative")
     if not math.isfinite(retry_backoff_seconds) or retry_backoff_seconds < 0:
         raise ValueError("runtime.retry_backoff_seconds must be non-negative")
+    if max_concurrent_requests < 1:
+        raise ValueError("runtime.max_concurrent_requests must be at least one")
 
     workspace_root = Path(cfg.paths.workspace_root).resolve()
     dataset_dir = workspace_root / "data" / str(cfg.dataset.folder)
@@ -287,116 +294,141 @@ def run_benchmark(
             timeout_seconds=float(cfg.runtime.timeout_seconds),
         )
 
-    prediction_rows: list[dict[str, Any]] = []
-    video_cache: dict[Path, VideoSample | Exception] = {}
-    run_started_at = time.monotonic()
     total_predictions = len(annotations) * len(seeds)
+    prediction_slots: list[dict[str, Any] | None] = [None] * total_predictions
+    video_cache: dict[Path, VideoSample | Exception] = {}
+    remaining_video_uses = Counter(annotation.video_path for annotation in annotations)
+    run_started_at = time.monotonic()
+
+    def record_completed(
+        future: Future[str],
+        task: tuple[int, Annotation, int, VideoSample],
+    ) -> None:
+        result_index, annotation, seed, video_sample = task
+        try:
+            raw_response = future.result()
+        except Exception as exc:
+            logger.error(
+                "vLLM request failed for %s (seed=%s); continuing: %s",
+                annotation.video_name,
+                seed,
+                exc,
+            )
+            prediction_slots[result_index] = _result_record(
+                annotation,
+                seed,
+                cfg,
+                status="inference_error",
+                error_message=str(exc),
+                sampled_frame_count=video_sample.sampled_frame_count,
+                candidate_frame_count=video_sample.candidate_frame_count,
+                sampling_mode=video_sample.sampling_mode,
+            )
+        else:
+            parsed_response = parse_response(raw_response)
+            prediction = parsed_response.count if parsed_response is not None else None
+            row = _result_record(
+                annotation,
+                seed,
+                cfg,
+                raw_response=raw_response,
+                status="ok" if prediction is not None else "parse_error",
+                error_message=(
+                    "Expected a JSON object with count, action_description, and reasoning"
+                    if parsed_response is None
+                    else ""
+                ),
+                sampled_frame_count=video_sample.sampled_frame_count,
+                candidate_frame_count=video_sample.candidate_frame_count,
+                sampling_mode=video_sample.sampling_mode,
+            )
+            row["pred_count"] = prediction
+            if parsed_response is not None:
+                row["action_description"] = parsed_response.action_description
+                row["reasoning"] = parsed_response.reasoning
+            if prediction is not None:
+                signed_error = prediction - annotation.gt_count
+                row["signed_error"] = signed_error
+                row["abs_error"] = abs(signed_error)
+                row["relative_abs_error"] = (
+                    abs(signed_error) / annotation.gt_count
+                    if annotation.gt_count > 0
+                    else None
+                )
+            prediction_slots[result_index] = row
+        progress.update()
+
     with tqdm(
         total=total_predictions,
         desc=f"{cfg.dataset.name} predictions",
         unit="pred",
         dynamic_ncols=True,
     ) as progress:
-        for annotation in annotations:
-            if annotation.video_path not in video_cache:
-                try:
-                    video_cache[annotation.video_path] = sampler(
-                        annotation.video_path,
-                        fps,
-                        max_frames,
-                    )
-                except Exception as exc:
-                    video_cache[annotation.video_path] = exc
+        with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
+            pending: dict[
+                Future[str], tuple[int, Annotation, int, VideoSample]
+            ] = {}
 
-            video_sample = video_cache[annotation.video_path]
-            if isinstance(video_sample, Exception):
-                for seed in seeds:
-                    progress.set_postfix_str(
-                        f"video={annotation.video_name[:24]} seed={seed}",
-                        refresh=False,
-                    )
-                    prediction_rows.append(
-                        _result_record(
+            def drain_completed() -> None:
+                completed, _ = wait(pending, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    task = pending.pop(future)
+                    record_completed(future, task)
+
+            for annotation_index, annotation in enumerate(annotations):
+                if annotation.video_path not in video_cache:
+                    try:
+                        video_cache[annotation.video_path] = sampler(
+                            annotation.video_path,
+                            fps,
+                            max_frames,
+                        )
+                    except Exception as exc:
+                        video_cache[annotation.video_path] = exc
+
+                video_sample = video_cache[annotation.video_path]
+                if isinstance(video_sample, Exception):
+                    for seed_index, seed in enumerate(seeds):
+                        result_index = annotation_index * len(seeds) + seed_index
+                        prediction_slots[result_index] = _result_record(
                             annotation,
                             seed,
                             cfg,
                             status="video_error",
                             error_message=str(video_sample),
                         )
-                    )
-                    progress.update()
-                continue
-
-            for seed in seeds:
-                progress.set_postfix_str(
-                    f"video={annotation.video_name[:24]} seed={seed}",
-                    refresh=False,
-                )
-                try:
-                    raw_response = _generate_with_retries(
-                        client,
-                        video=video_sample,
-                        prompt=prompts[annotation.annotation_id],
-                        seed=seed,
-                        temperature=temperature,
-                        max_tokens=int(cfg.generation.max_tokens),
-                        max_retries=max_retries,
-                        retry_backoff_seconds=retry_backoff_seconds,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "vLLM request failed for %s (seed=%s); continuing: %s",
-                        annotation.video_name,
-                        seed,
-                        exc,
-                    )
-                    prediction_rows.append(
-                        _result_record(
+                        progress.update()
+                else:
+                    for seed_index, seed in enumerate(seeds):
+                        while len(pending) >= max_concurrent_requests:
+                            drain_completed()
+                        result_index = annotation_index * len(seeds) + seed_index
+                        future = executor.submit(
+                            _generate_with_retries,
+                            client,
+                            video=video_sample,
+                            prompt=prompts[annotation.annotation_id],
+                            seed=seed,
+                            temperature=temperature,
+                            max_tokens=int(cfg.generation.max_tokens),
+                            max_retries=max_retries,
+                            retry_backoff_seconds=retry_backoff_seconds,
+                        )
+                        pending[future] = (
+                            result_index,
                             annotation,
                             seed,
-                            cfg,
-                            status="inference_error",
-                            error_message=str(exc),
-                            sampled_frame_count=video_sample.sampled_frame_count,
-                            candidate_frame_count=video_sample.candidate_frame_count,
-                            sampling_mode=video_sample.sampling_mode,
+                            video_sample,
                         )
-                    )
-                    progress.update()
-                    continue
 
-                parsed_response = parse_response(raw_response)
-                prediction = parsed_response.count if parsed_response is not None else None
-                row = _result_record(
-                    annotation,
-                    seed,
-                    cfg,
-                    raw_response=raw_response,
-                    status="ok" if prediction is not None else "parse_error",
-                    error_message=(
-                        "Expected a JSON object with count, action_description, and reasoning"
-                        if parsed_response is None
-                        else ""
-                    ),
-                    sampled_frame_count=video_sample.sampled_frame_count,
-                    candidate_frame_count=video_sample.candidate_frame_count,
-                    sampling_mode=video_sample.sampling_mode,
-                )
-                row["pred_count"] = prediction
-                if parsed_response is not None:
-                    row["action_description"] = parsed_response.action_description
-                    row["reasoning"] = parsed_response.reasoning
-                if prediction is not None:
-                    signed_error = prediction - annotation.gt_count
-                    row["signed_error"] = signed_error
-                    row["abs_error"] = abs(signed_error)
-                    row["relative_abs_error"] = (
-                        abs(signed_error) / annotation.gt_count
-                        if annotation.gt_count > 0
-                        else None
-                    )
-                prediction_rows.append(row)
-                progress.update()
+                remaining_video_uses[annotation.video_path] -= 1
+                if remaining_video_uses[annotation.video_path] == 0:
+                    del video_cache[annotation.video_path]
+
+            while pending:
+                drain_completed()
+
+    prediction_rows = [row for row in prediction_slots if row is not None]
 
     run_status = (
         "complete_with_errors"

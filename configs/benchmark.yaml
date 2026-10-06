@@ -14,6 +14,7 @@ runtime:
   timeout_seconds: 600
   max_retries: 2
   retry_backoff_seconds: 1.0
+  max_concurrent_requests: 2
 
 benchmark:
   seeds: [13, 17, 23, 42, 99]

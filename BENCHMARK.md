@@ -94,6 +94,9 @@ For a model other than the default, start its server with the corresponding
 temperature (including `0`), frame cap, endpoint, retry count, and output root
 through Hydra overrides, for example
 `benchmark.seeds='[13,17,23,42,99]' generation.temperature=0 sampling.max_frames=128`.
+Inference requests run concurrently, up to `runtime.max_concurrent_requests`
+(default: 2). Lower this value if GPU or system memory is constrained, or set it
+to `1` to run requests sequentially.
 
 The sampler decodes frames from the video stream only (`-map 0:v:0`), never
 reads or transmits audio, and sends the sampled sequence using vLLM's
