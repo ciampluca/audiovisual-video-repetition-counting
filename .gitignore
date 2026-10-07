@@ -74,4 +74,4 @@ node_modules/
 /tests/
 
 .hydra_runs
-./multirun
+multirun
