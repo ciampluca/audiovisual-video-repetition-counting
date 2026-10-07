@@ -80,6 +80,27 @@ CSV has no `description` column or any row contains a blank or `unknown`
 description. The description identifies the action; the count must be based on
 visible video evidence, not inferred from the text.
 
+Add global repetition-sequence localization to any counting prompt with:
+
+```bash
+video-repetition-benchmark dataset=repcount prompt=count_repetitions localization=global_sequence
+```
+
+The localization option can be combined with every counting prompt, including
+class- and description-conditioned prompts. For example:
+
+```bash
+video-repetition-benchmark dataset=ovr_kinetics prompt=count_description_action localization=global_sequence
+```
+
+It predicts one interval for the full sequence, not individual-cycle boundaries.
+Normalized start/end positions are converted to seconds using the video duration.
+Predictions and per-seed metrics include temporal IoU and boundary errors.
+Missing or malformed localization does not invalidate an otherwise valid count
+prediction. Localization is disabled by default; count-only runs preserve their
+existing output path, while localized runs use a distinct prompt ID such as
+`count-repetitions+global-sequence`.
+
 Run a dataset/prompt/FPS sweep against the model currently loaded by vLLM:
 
 ```bash
@@ -125,7 +146,10 @@ results/{dataset}/{model}/video-only/{prompt}/fps-{fps}/temperature-{temperature
 `predictions.csv` contains one record per annotation row and seed, including the
 source `class_name` and `description` when present, raw response, parsed count,
 action description, concise motion reasoning, signed/absolute/relative error,
-FPS, temperature, and status.
+FPS, temperature, status, and separate `prompt_id` and `localization_id` fields.
+When `localization=global_sequence`, it also includes GT and predicted sequence
+intervals, normalized predictions, temporal IoU, and start/end boundary errors
+in seconds.
 
 - `mae_percent`: the *Every Shot Counts* MAE, computed as the mean per-row
   absolute error divided by that row's positive ground-truth count, expressed
@@ -137,13 +161,18 @@ FPS, temperature, and status.
 - `rmse_count`: root mean square raw-count error.
 - `obz_percent`: percentage with exact counts.
 - `obo_percent`: percentage within one count.
+- `mean_temporal_iou`: mean intersection-over-union for valid global sequence
+  intervals; `tiou_at_0_3_percent`, `tiou_at_0_5_percent`, and
+  `tiou_at_0_75_percent` report the share of intervals meeting each threshold.
+- `start_mae_sec`, `end_mae_sec`, and `boundary_mae_sec`: absolute boundary
+  errors in seconds for valid localization predictions.
 
-The model is prompted to return exactly one JSON object with `count` (a
-non-negative integer), `action_description` (a short description), and
-`reasoning` (one concise sentence grounded in visible motion). The object must
-contain exactly those fields, with non-empty strings for the two descriptive
-fields. Invalid JSON or fields are retained with `parse_error` status and
-excluded from aggregate metrics; the raw response remains in `predictions.csv`.
+The count prompts return exactly one JSON object with `count` (a non-negative
+integer), `action_description` (a short description), and `reasoning` (one
+concise sentence grounded in visible motion). The localization prompt additionally
+returns `sequence_start_fraction` and `sequence_end_fraction` in `[0, 1]`. Invalid
+JSON or fields are retained with a parse-error status and excluded from the
+corresponding aggregate metrics; the raw response remains in `predictions.csv`.
 Missing or unreadable videos are retained as error rows.
 Transient vLLM failures (connection/timeouts, HTTP 429, and HTTP 5xx) are retried
 using `runtime.max_retries` and exponential backoff. After retries are exhausted,

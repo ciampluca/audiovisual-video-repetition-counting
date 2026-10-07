@@ -12,6 +12,29 @@ class PromptContextError(ValueError):
     pass
 
 
+def compose_prompt(task_prompt: str, localization_instruction: str | None = None) -> str:
+    sections = [task_prompt.strip()]
+    fields = [
+        '"count" (a non-negative integer)',
+        '"action_description" (a short description of the repeated action)',
+        '"reasoning" (one concise sentence grounded in visible motion)',
+    ]
+    if localization_instruction:
+        sections.append(localization_instruction.strip())
+        fields.extend(
+            [
+                '"sequence_start_fraction" (a number from 0.0 to 1.0)',
+                '"sequence_end_fraction" (a number from 0.0 to 1.0, greater than the start fraction)',
+            ]
+        )
+    sections.append(
+        "Return exactly one JSON object with exactly these fields: "
+        + ", ".join(fields)
+        + ". Do not include markdown or any text outside the JSON object."
+    )
+    return "\n\n".join(sections)
+
+
 def render_prompt(template: str, annotation: object, context_fields: Iterable[str] = ()) -> str:
     configured_fields = tuple(context_fields)
     if len(set(configured_fields)) != len(configured_fields):

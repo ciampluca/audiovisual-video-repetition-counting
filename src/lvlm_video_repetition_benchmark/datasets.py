@@ -14,6 +14,8 @@ class Annotation:
     video_path: Path
     gt_count: float
     annotation_split: str
+    gt_sequence_start_sec: float | None = None
+    gt_sequence_end_sec: float | None = None
     class_name: str | None = None
     description: str | None = None
 
@@ -48,6 +50,16 @@ def load_annotations(
                 f"{csv_path} is missing required columns: "
                 f"{', '.join(sorted(missing_columns))}"
             )
+        interval_columns = {
+            "repetition_segment_start_sec",
+            "repetition_segment_end_sec",
+        }
+        present_interval_columns = interval_columns.intersection(reader.fieldnames or ())
+        if present_interval_columns and present_interval_columns != interval_columns:
+            raise ValueError(
+                f"{csv_path} must contain both global repetition interval columns: "
+                f"{', '.join(sorted(interval_columns))}"
+            )
 
         for row_number, row in enumerate(reader, start=1):
             video_name = (row.get("video_name") or "").strip()
@@ -65,6 +77,35 @@ def load_annotations(
                     f"data row {row_number}: {row['count']!r}"
                 )
 
+            start_raw = (row.get("repetition_segment_start_sec") or "").strip()
+            end_raw = (row.get("repetition_segment_end_sec") or "").strip()
+            if bool(start_raw) != bool(end_raw):
+                raise ValueError(
+                    f"Incomplete repetition interval in {csv_path}, data row {row_number}"
+                )
+            if start_raw:
+                try:
+                    gt_sequence_start_sec = float(start_raw)
+                    gt_sequence_end_sec = float(end_raw)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid repetition interval in {csv_path}, "
+                        f"data row {row_number}"
+                    ) from exc
+                if (
+                    not math.isfinite(gt_sequence_start_sec)
+                    or not math.isfinite(gt_sequence_end_sec)
+                    or gt_sequence_start_sec < 0
+                    or gt_sequence_end_sec <= gt_sequence_start_sec
+                ):
+                    raise ValueError(
+                        f"Repetition interval must be finite, non-negative, and "
+                        f"increasing in {csv_path}, data row {row_number}"
+                    )
+            else:
+                gt_sequence_start_sec = None
+                gt_sequence_end_sec = None
+
             annotations.append(
                 Annotation(
                     annotation_id=f"{dataset_slug}_{split}_{row_number:06d}",
@@ -73,6 +114,8 @@ def load_annotations(
                     video_path=video_dir / video_name,
                     gt_count=gt_count,
                     annotation_split=split,
+                    gt_sequence_start_sec=gt_sequence_start_sec,
+                    gt_sequence_end_sec=gt_sequence_end_sec,
                     class_name=(row.get("class") or "").strip() or None,
                     description=(row.get("description") or "").strip() or None,
                 )

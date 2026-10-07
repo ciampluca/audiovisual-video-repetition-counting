@@ -72,3 +72,6 @@ node_modules/
 /data/**/intermediate_kinetics_videos/
 /data/**/intermediate_ego4d_videos/
 /tests/
+
+.hydra_runs
+./multirun

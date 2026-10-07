@@ -1,0 +1,4 @@
+name: Global Sequence Localization
+slug: global-sequence
+enabled: true
+instruction: 'Also locate the single overall interval containing the full sequence of the same target action counted above. Start at the onset of its first repetition and end when its last repetition finishes. Include pauses between repetitions that belong to the sequence, but exclude unrelated activity before or after it. Do not return separate intervals for individual repetitions. Estimate both boundaries as fractions of the full video timeline, where 0.0 is the beginning and 1.0 is the end.'

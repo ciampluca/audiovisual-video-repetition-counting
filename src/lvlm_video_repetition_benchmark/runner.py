@@ -12,9 +12,13 @@ from typing import Any, Callable
 from tqdm import tqdm
 
 from lvlm_video_repetition_benchmark.datasets import Annotation, load_annotations
-from lvlm_video_repetition_benchmark.metrics import compute_metrics
+from lvlm_video_repetition_benchmark.metrics import compute_metrics, temporal_iou
 from lvlm_video_repetition_benchmark.parsing import parse_response
-from lvlm_video_repetition_benchmark.prompting import PromptContextError, render_prompt
+from lvlm_video_repetition_benchmark.prompting import (
+    PromptContextError,
+    compose_prompt,
+    render_prompt,
+)
 from lvlm_video_repetition_benchmark.video import VideoSample, sample_video
 from lvlm_video_repetition_benchmark.vllm_client import VLLMVideoClient
 
@@ -26,6 +30,13 @@ class DatasetSkippedError(RuntimeError):
     pass
 
 
+def _localization_identity(cfg: Any) -> tuple[str, str]:
+    localization = getattr(cfg, "localization", None)
+    if bool(getattr(localization, "enabled", False)):
+        return str(localization.name), str(localization.slug)
+    return "Count Only", "none"
+
+
 PREDICTION_COLUMNS = [
     "dataset",
     "annotation_split",
@@ -35,8 +46,18 @@ PREDICTION_COLUMNS = [
     "class_name",
     "description",
     "video_path",
+    "video_duration_sec",
     "gt_count",
     "pred_count",
+    "gt_sequence_start_sec",
+    "gt_sequence_end_sec",
+    "pred_sequence_start_fraction",
+    "pred_sequence_end_fraction",
+    "pred_sequence_start_sec",
+    "pred_sequence_end_sec",
+    "temporal_iou",
+    "sequence_start_abs_error_sec",
+    "sequence_end_abs_error_sec",
     "action_description",
     "reasoning",
     "signed_error",
@@ -50,6 +71,8 @@ PREDICTION_COLUMNS = [
     "model_id",
     "prompt_name",
     "prompt_id",
+    "localization_name",
+    "localization_id",
     "fps",
     "sampled_frame_count",
     "candidate_frame_count",
@@ -62,6 +85,8 @@ METRIC_COLUMNS = [
     "annotation_split",
     "model_name",
     "prompt_name",
+    "localization_name",
+    "localization_id",
     "fps",
     "temperature",
     "seed",
@@ -74,6 +99,14 @@ METRIC_COLUMNS = [
     "rmse_count",
     "obz_percent",
     "obo_percent",
+    "n_localization_predictions",
+    "mean_temporal_iou",
+    "tiou_at_0_3_percent",
+    "tiou_at_0_5_percent",
+    "tiou_at_0_75_percent",
+    "start_mae_sec",
+    "end_mae_sec",
+    "boundary_mae_sec",
 ]
 
 
@@ -97,7 +130,9 @@ def _result_record(
     sampled_frame_count: int | None = None,
     candidate_frame_count: int | None = None,
     sampling_mode: str | None = None,
+    video_duration_sec: float | None = None,
 ) -> dict[str, Any]:
+    localization_name, localization_slug = _localization_identity(cfg)
     return {
         "dataset": cfg.dataset.name,
         "annotation_split": annotation.annotation_split,
@@ -107,8 +142,18 @@ def _result_record(
         "class_name": annotation.class_name,
         "description": annotation.description,
         "video_path": str(annotation.video_path),
+        "video_duration_sec": video_duration_sec,
         "gt_count": annotation.gt_count,
         "pred_count": None,
+        "gt_sequence_start_sec": annotation.gt_sequence_start_sec,
+        "gt_sequence_end_sec": annotation.gt_sequence_end_sec,
+        "pred_sequence_start_fraction": None,
+        "pred_sequence_end_fraction": None,
+        "pred_sequence_start_sec": None,
+        "pred_sequence_end_sec": None,
+        "temporal_iou": None,
+        "sequence_start_abs_error_sec": None,
+        "sequence_end_abs_error_sec": None,
         "action_description": None,
         "reasoning": None,
         "signed_error": None,
@@ -122,6 +167,8 @@ def _result_record(
         "model_id": cfg.model.hf_id,
         "prompt_name": cfg.prompt.name,
         "prompt_id": cfg.prompt.slug,
+        "localization_name": localization_name,
+        "localization_id": localization_slug,
         "fps": float(cfg.sampling.fps),
         "sampled_frame_count": sampled_frame_count,
         "candidate_frame_count": candidate_frame_count,
@@ -195,6 +242,7 @@ def _write_outputs(
 ) -> None:
     _write_csv(output_dir / "predictions.csv", PREDICTION_COLUMNS, prediction_rows)
     metric_rows: list[dict[str, Any]] = []
+    localization_name, localization_slug = _localization_identity(cfg)
     for seed in seeds:
         seed_rows = [row for row in prediction_rows if row["seed"] == seed]
         metrics = compute_metrics(seed_rows)
@@ -204,6 +252,8 @@ def _write_outputs(
                 "annotation_split": annotations[0].annotation_split if annotations else "",
                 "model_name": cfg.model.name,
                 "prompt_name": cfg.prompt.name,
+                "localization_name": localization_name,
+                "localization_id": localization_slug,
                 "fps": float(cfg.sampling.fps),
                 "temperature": float(cfg.generation.temperature),
                 "seed": seed,
@@ -245,6 +295,17 @@ def run_benchmark(
         raise ValueError("runtime.max_concurrent_requests must be at least one")
 
     workspace_root = Path(cfg.paths.workspace_root).resolve()
+    prompt_slug = str(cfg.prompt.slug)
+    localization_cfg = getattr(cfg, "localization", None)
+    localization_enabled = bool(getattr(localization_cfg, "enabled", False))
+    _, localization_slug = _localization_identity(cfg)
+    localization_instruction = str(
+        getattr(localization_cfg, "instruction", "") or ""
+    ).strip()
+    if localization_enabled and not localization_instruction:
+        raise ValueError(
+            "localization.instruction must be provided when localization is enabled"
+        )
     dataset_dir = workspace_root / "data" / str(cfg.dataset.folder)
     annotations, annotation_csv, split = load_annotations(
         dataset_dir,
@@ -255,22 +316,33 @@ def run_benchmark(
     if isinstance(configured_context_fields, str):
         configured_context_fields = (configured_context_fields,)
     context_fields = tuple(str(field) for field in configured_context_fields)
+    if localization_enabled and any(
+        annotation.gt_sequence_start_sec is None
+        or annotation.gt_sequence_end_sec is None
+        for annotation in annotations
+    ):
+        raise DatasetSkippedError(
+            f"Dataset {cfg.dataset.name!r} skipped for prompt {prompt_slug!r} "
+            f"with localization {localization_slug!r}: "
+            "global repetition interval annotations are required."
+        )
     if context_fields and not annotations:
         raise DatasetSkippedError(
-            f"Dataset {cfg.dataset.name!r} skipped for prompt {cfg.prompt.slug!r}: "
+            f"Dataset {cfg.dataset.name!r} skipped for prompt {prompt_slug!r}: "
             f"selected annotation file {annotation_csv} contains no rows for the "
             f"required prompt context fields {', '.join(context_fields)}."
         )
     try:
         prompts = {
-            annotation.annotation_id: render_prompt(
-                str(cfg.prompt.text), annotation, context_fields
+            annotation.annotation_id: compose_prompt(
+                render_prompt(str(cfg.prompt.text), annotation, context_fields),
+                localization_instruction if localization_enabled else None,
             )
             for annotation in annotations
         }
     except PromptContextError as exc:
         raise DatasetSkippedError(
-            f"Dataset {cfg.dataset.name!r} skipped for prompt {cfg.prompt.slug!r}: "
+            f"Dataset {cfg.dataset.name!r} skipped for prompt {prompt_slug!r}: "
             f"selected annotation file {annotation_csv} has missing or invalid "
             f"required prompt context ({exc})."
         ) from exc
@@ -280,7 +352,11 @@ def run_benchmark(
         / str(cfg.dataset.slug)
         / str(cfg.model.slug)
         / "video-only"
-        / str(cfg.prompt.slug)
+        / (
+            f"{prompt_slug}+{localization_slug}"
+            if localization_enabled
+            else prompt_slug
+        )
         / f"fps-{fps:g}"
         / f"temperature-{temperature:g}"
     )
@@ -323,29 +399,78 @@ def run_benchmark(
                 sampled_frame_count=video_sample.sampled_frame_count,
                 candidate_frame_count=video_sample.candidate_frame_count,
                 sampling_mode=video_sample.sampling_mode,
+                video_duration_sec=video_sample.duration,
             )
         else:
-            parsed_response = parse_response(raw_response)
+            parsed_response = parse_response(
+                raw_response, require_localization=localization_enabled
+            )
             prediction = parsed_response.count if parsed_response is not None else None
+            localization_missing = (
+                localization_enabled
+                and parsed_response is not None
+                and parsed_response.localization_error is not None
+            )
+            status = (
+                "parse_error"
+                if parsed_response is None
+                else "localization_parse_error"
+                if localization_missing
+                else "ok"
+            )
             row = _result_record(
                 annotation,
                 seed,
                 cfg,
                 raw_response=raw_response,
-                status="ok" if prediction is not None else "parse_error",
+                status=status,
                 error_message=(
-                    "Expected a JSON object with count, action_description, and reasoning"
+                    parsed_response.localization_error
+                    if localization_missing
+                    else "Expected a JSON object with count, action_description, and reasoning"
                     if parsed_response is None
                     else ""
                 ),
                 sampled_frame_count=video_sample.sampled_frame_count,
                 candidate_frame_count=video_sample.candidate_frame_count,
                 sampling_mode=video_sample.sampling_mode,
+                video_duration_sec=video_sample.duration,
             )
             row["pred_count"] = prediction
             if parsed_response is not None:
                 row["action_description"] = parsed_response.action_description
                 row["reasoning"] = parsed_response.reasoning
+                if (
+                    localization_enabled
+                    and parsed_response.sequence_start_fraction is not None
+                    and parsed_response.sequence_end_fraction is not None
+                ):
+                    row["pred_sequence_start_fraction"] = (
+                        parsed_response.sequence_start_fraction
+                    )
+                    row["pred_sequence_end_fraction"] = (
+                        parsed_response.sequence_end_fraction
+                    )
+                    predicted_start = (
+                        parsed_response.sequence_start_fraction * video_sample.duration
+                    )
+                    predicted_end = (
+                        parsed_response.sequence_end_fraction * video_sample.duration
+                    )
+                    row["pred_sequence_start_sec"] = predicted_start
+                    row["pred_sequence_end_sec"] = predicted_end
+                    row["sequence_start_abs_error_sec"] = abs(
+                        predicted_start - annotation.gt_sequence_start_sec
+                    )
+                    row["sequence_end_abs_error_sec"] = abs(
+                        predicted_end - annotation.gt_sequence_end_sec
+                    )
+                    row["temporal_iou"] = temporal_iou(
+                        annotation.gt_sequence_start_sec,
+                        annotation.gt_sequence_end_sec,
+                        predicted_start,
+                        predicted_end,
+                    )
             if prediction is not None:
                 signed_error = prediction - annotation.gt_count
                 row["signed_error"] = signed_error
@@ -440,13 +565,28 @@ def run_benchmark(
     print(f"Wrote predictions and per-seed metrics to: {output_dir}")
     status_counts = {
         status: sum(row["status"] == status for row in prediction_rows)
-        for status in ("ok", "parse_error", "inference_error", "video_error")
+        for status in (
+            "ok",
+            "parse_error",
+            "localization_parse_error",
+            "inference_error",
+            "video_error",
+        )
     }
+    status_summary = [
+        f"{status}={status_counts[status]}"
+        for status in ("ok", "parse_error", "inference_error", "video_error")
+    ]
+    if status_counts["localization_parse_error"]:
+        status_summary.insert(
+            2,
+            f"localization_parse_error={status_counts['localization_parse_error']}",
+        )
     elapsed_seconds = time.monotonic() - run_started_at
     print(
         "Prediction summary: "
         f"{len(prediction_rows)}/{total_predictions} rows in {elapsed_seconds:.1f}s; "
-        + ", ".join(f"{status}={count}" for status, count in status_counts.items())
+        + ", ".join(status_summary)
     )
     if run_status == "complete_with_errors":
         print("Inspect status and error_message in predictions.csv for failed rows.")

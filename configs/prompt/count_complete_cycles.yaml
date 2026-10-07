@@ -1,3 +1,3 @@
 name: Count Complete Cycles
 slug: count-complete-cycles
-text: 'Watch the full video and identify the main recurring action yourself. Count each complete cycle of that action once. Return exactly one JSON object with exactly these fields: "count" (a non-negative integer), "action_description" (a short description of the repeated action), and "reasoning" (one concise sentence describing visible motion evidence). Do not include markdown or any text outside the JSON object.'
+text: 'Watch the full video and identify the main recurring action yourself. Count each complete cycle of that action once.'
