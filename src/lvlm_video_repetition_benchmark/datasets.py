@@ -36,8 +36,19 @@ def load_annotations(
     dataset_dir: Path,
     dataset_slug: str,
     annotation_prefix: str,
+    annotation_split: str | None = None,
 ) -> tuple[list[Annotation], Path, str]:
-    csv_path, split = select_annotation_csv(dataset_dir, annotation_prefix)
+    if annotation_split is None:
+        csv_path, split = select_annotation_csv(dataset_dir, annotation_prefix)
+    else:
+        if annotation_split not in {"train", "val", "test"}:
+            raise ValueError(
+                "annotation_split must be one of 'train', 'val', or 'test'"
+            )
+        split = annotation_split
+        csv_path = dataset_dir / "annotations" / f"{annotation_prefix}_{split}.csv"
+        if not csv_path.is_file():
+            raise FileNotFoundError(f"Annotation CSV not found: {csv_path}")
     video_dir = dataset_dir / "videos"
     annotations: list[Annotation] = []
 

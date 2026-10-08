@@ -2,7 +2,7 @@
 """Filter Countix CSV annotations based on successfully downloaded/extracted videos.
 
 Reads the original CSVs from the 'orig_anns' directory, checks if the video file
-exists in the 'videos/' directory, and creates new CSVs in the 'annotations/'
+exists in the 'full_clip_videos/' directory, and creates new CSVs in the 'full_clip_annotations/'
 directory replacing the video_id with the actual downloaded video filename.
 """
 
@@ -23,9 +23,9 @@ def time_token(value: float) -> str:
 
 
 def main() -> int:
-    videos_dir = SCRIPT_DIR / "videos"
+    videos_dir = SCRIPT_DIR / "full_clip_videos"
     orig_anns_dir = SCRIPT_DIR / "orig_anns"
-    annotations_dir = SCRIPT_DIR / "annotations"
+    annotations_dir = SCRIPT_DIR / "full_clip_annotations"
     
     if not videos_dir.is_dir():
         print(f"Error: Directory {videos_dir.name} does not exist.", file=sys.stderr)

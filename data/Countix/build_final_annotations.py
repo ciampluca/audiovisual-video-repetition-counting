@@ -42,8 +42,8 @@ def get_fps(video_path: Path, ffprobe_path: str) -> float:
         raise RuntimeError(f"Impossibile determinare gli FPS per {video_path.name}: {exc}")
 
 def main() -> int:
-    annotations_dir = SCRIPT_DIR / "annotations"
-    videos_dir = SCRIPT_DIR / "videos"
+    annotations_dir = SCRIPT_DIR / "full_clip_annotations"
+    videos_dir = SCRIPT_DIR / "full_clip_videos"
     
     if not annotations_dir.is_dir():
         print(f"Errore: La cartella {annotations_dir.name} non esiste.", file=sys.stderr)

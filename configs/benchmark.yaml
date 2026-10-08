@@ -21,12 +21,13 @@ benchmark:
   seeds: [13, 17, 23, 42, 99]
 
 sampling:
-  fps: 1.0
+  fps: 10.0
   max_frames: 3000
 
 generation:
   temperature: 0.2
   max_tokens: 128
+  response_fields: [count]
 
 hydra:
   run:

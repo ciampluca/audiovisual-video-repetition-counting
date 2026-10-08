@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 video-repetition-benchmark = "lvlm_video_repetition_benchmark.cli:main"
+video-repetition-train-lora = "lvlm_video_repetition_benchmark.train_lora:main"
 
 [project.optional-dependencies]
 notebook = [
@@ -23,6 +24,13 @@ notebook = [
     "matplotlib>=3.7",
     "numpy>=1.24",
     "pandas>=2.0",
+]
+train = [
+    "accelerate>=1.2",
+    "bitsandbytes>=0.45",
+    "peft>=0.18,<1",
+    "pillow>=10",
+    "transformers>=4.57.1,<5",
 ]
 
 [tool.setuptools.packages.find]

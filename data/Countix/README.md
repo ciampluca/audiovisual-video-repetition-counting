@@ -4,12 +4,14 @@ To generate final annotations run in the following order:
 3. parse_orig_annotations.py
 4. build_final_annotations.py
 5. add_final_columns.py
+6. build_trim_repetition_segments
+7. extract_countix_video_only.py
 
 To extract audio tracks, run:
 2. extract_countix_audio.py
 
 The number of videos claimed in the paper for train, val, and test is 4588, 1450, 2719. After preprocessing and filtering we have 4118, 1432, 2564 videos.
 
-NOTE: Videos are heavily untrimmed in a way similar to OVR
+NOTE: Videos are heavily untrimmed in a way similar to OVR. However, I found that previous papers process only trimmed segments from the whole clip.
 
 NOTE: Repetition intervals are created dividing uniformerly the interval

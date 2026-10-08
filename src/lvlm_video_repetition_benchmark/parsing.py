@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class ParsedResponse:
 def parse_response(
     response: str,
     require_localization: bool = False,
+    expected_fields: Iterable[str] | None = None,
 ) -> ParsedResponse | None:
     try:
         payload = json.loads(response)
@@ -29,19 +31,35 @@ def parse_response(
     if not isinstance(payload, dict):
         return None
     fields = set(payload)
-    if not required_fields.issubset(fields) or fields - required_fields - localization_fields:
+    if (
+        "count" not in fields
+        or fields - required_fields - localization_fields
+    ):
         return None
+    if expected_fields is not None:
+        selected_fields = tuple(expected_fields)
+        if (
+            len(set(selected_fields)) != len(selected_fields)
+            or "count" not in selected_fields
+            or set(selected_fields) - required_fields
+            or fields - localization_fields != set(selected_fields)
+        ):
+            return None
     has_localization = localization_fields.issubset(fields)
     has_partial_localization = bool(fields.intersection(localization_fields)) and not has_localization
 
     count = payload["count"]
-    action_description = payload["action_description"]
-    reasoning = payload["reasoning"]
+    action_description = payload.get("action_description", "")
+    reasoning = payload.get("reasoning", "")
     if type(count) is not int or count < 0:
         return None
-    if not isinstance(action_description, str) or not action_description.strip():
+    if "action_description" in fields and (
+        not isinstance(action_description, str) or not action_description.strip()
+    ):
         return None
-    if not isinstance(reasoning, str) or not reasoning.strip():
+    if "reasoning" in fields and (
+        not isinstance(reasoning, str) or not reasoning.strip()
+    ):
         return None
 
     sequence_start_fraction = None

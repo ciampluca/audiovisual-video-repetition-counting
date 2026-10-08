@@ -8,8 +8,8 @@ from tqdm import tqdm
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 # Unisce il percorso dello script alle cartelle
-ANNOTATIONS_DIR = SCRIPT_DIR / "annotations"
-VIDEO_ROOT = SCRIPT_DIR / "videos"
+ANNOTATIONS_DIR = SCRIPT_DIR / "full_clip_annotations"
+VIDEO_ROOT = SCRIPT_DIR / "full_clip_videos"
 SPLITS = ["train", "val", "test"]
 
 def get_video_duration(video_path: Path) -> float:

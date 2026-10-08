@@ -2,7 +2,7 @@
 """Extract valid WAV audio from referenced Countix dataset videos.
 
 The script reads ``countix_*.csv`` from ``annotations/`` and resolves each exact
-``video_name`` in ``videos/``, validates the first audio stream by decoding it,
+``video_name`` in ``videos_with_audio/``, validates the first audio stream by decoding it,
 and converts that stream to 16-bit PCM WAV in ``audios/``. The output keeps the
 same video ID and replaces the video extension with ``.wav``.
 
@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--videos-dir",
         type=Path,
-        default=Path("videos"),
+        default=Path("videos_with_audio"),
         help="Video directory, relative to --root unless absolute.",
     )
     parser.add_argument(

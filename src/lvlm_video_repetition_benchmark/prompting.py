@@ -12,13 +12,23 @@ class PromptContextError(ValueError):
     pass
 
 
-def compose_prompt(task_prompt: str, localization_instruction: str | None = None) -> str:
+def compose_prompt(
+    task_prompt: str,
+    localization_instruction: str | None = None,
+    response_fields: Iterable[str] | None = None,
+) -> str:
     sections = [task_prompt.strip()]
-    fields = [
-        '"count" (a non-negative integer)',
-        '"action_description" (a short description of the repeated action)',
-        '"reasoning" (one concise sentence grounded in visible motion)',
-    ]
+    field_descriptions = {
+        "count": '"count" (a non-negative integer)',
+        "action_description": '"action_description" (a short description of the repeated action)',
+        "reasoning": '"reasoning" (one concise sentence grounded in visible motion)',
+    }
+    selected_fields = tuple(response_fields or field_descriptions)
+    if len(set(selected_fields)) != len(selected_fields):
+        raise ValueError("Prompt response_fields must not contain duplicates")
+    if "count" not in selected_fields or set(selected_fields) - field_descriptions.keys():
+        raise ValueError("Prompt response_fields must include count and use supported fields")
+    fields = [field_descriptions[field] for field in selected_fields]
     if localization_instruction:
         sections.append(localization_instruction.strip())
         fields.extend(

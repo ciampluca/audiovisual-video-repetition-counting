@@ -93,6 +93,7 @@ METRIC_COLUMNS = [
     "run_status",
     "n_total",
     "n_valid_predictions",
+    "nmae",
     "mae_n",
     "mae_percent",
     "legacy_mae_count",
@@ -333,10 +334,14 @@ def run_benchmark(
             f"required prompt context fields {', '.join(context_fields)}."
         )
     try:
+        response_fields = getattr(cfg.generation, "response_fields", None)
+        if isinstance(response_fields, str):
+            response_fields = (response_fields,)
         prompts = {
             annotation.annotation_id: compose_prompt(
                 render_prompt(str(cfg.prompt.text), annotation, context_fields),
                 localization_instruction if localization_enabled else None,
+                response_fields=response_fields,
             )
             for annotation in annotations
         }
@@ -403,7 +408,9 @@ def run_benchmark(
             )
         else:
             parsed_response = parse_response(
-                raw_response, require_localization=localization_enabled
+                raw_response,
+                require_localization=localization_enabled,
+                expected_fields=response_fields,
             )
             prediction = parsed_response.count if parsed_response is not None else None
             localization_missing = (
@@ -427,7 +434,7 @@ def run_benchmark(
                 error_message=(
                     parsed_response.localization_error
                     if localization_missing
-                    else "Expected a JSON object with count, action_description, and reasoning"
+                    else "Expected a JSON object matching generation.response_fields"
                     if parsed_response is None
                     else ""
                 ),

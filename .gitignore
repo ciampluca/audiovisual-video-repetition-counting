@@ -75,3 +75,8 @@ node_modules/
 
 .hydra_runs
 multirun
+/adapters/
+
+/repositories/**
+/data/**/full_clip_videos/
+/data/**/videos_with_audio/

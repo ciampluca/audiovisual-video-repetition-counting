@@ -1,7 +1,8 @@
 # Zero-Shot Video Repetition Benchmark
 
 This benchmark evaluates video-capable LVLMs on the Countix, RepCount, UCFRep,
-OVR-Kinetics, and OVR-Ego4d annotations. It does not train or fine-tune models.
+OVR-Kinetics, and OVR-Ego4d annotations. The benchmark runner does not train or
+fine-tune models; an opt-in Qwen3-VL LoRA trainer is documented below.
 The existing prompts use sampled video and do not include annotation metadata.
 The optional `count-class-action` prompt sends the row's `class` value as text
 context, and `count-description-action` sends its `description` value. These
@@ -22,6 +23,63 @@ Install the optional results-notebook dependencies with:
 ```bash
 python -m pip install -e ".[notebook]"
 ```
+
+## Qwen3-VL LoRA Training
+
+Use a CUDA-compatible PyTorch environment, then install the optional training
+dependencies:
+
+```bash
+python -m pip install -e ".[train]"
+```
+
+The initial experiment trains one 4-bit LoRA adapter on the official Countix
+`train` split using the fixed predominant-action prompt and count-only JSON
+targets. It does not select validation/test data or pass annotation class,
+description, audio, or repetition intervals to the model. The default uses
+language-backbone attention LoRA (rank 16), gradient checkpointing, one video
+per micro-batch, and up to 32 frames sampled at 1 FPS. The vision tower remains
+frozen. It is configured for one CUDA GPU; adjust frame count or accumulation
+steps to fit available memory.
+
+Start training from the repository root:
+
+```bash
+video-repetition-train-lora
+```
+
+Run a one-step smoke test before a full run:
+
+```bash
+video-repetition-train-lora data.max_train_samples=2 training.max_steps=1 training.gradient_accumulation_steps=1 training.epochs=1 paths.output_dir=/tmp/qwen3-vl-lora-smoke
+```
+
+The final adapter and processor are saved under
+`adapters/qwen3-vl-8b-countix-lora/` by default. To serve it with vLLM:
+
+```bash
+vllm serve Qwen/Qwen3-VL-8B-Instruct \
+  --served-model-name qwen3-vl-8b \
+  --enable-lora \
+  --lora-modules countix-lora=adapters/qwen3-vl-8b-countix-lora
+```
+
+Compare the base model and adapter with identical seeds, temperature, and
+count-only output schema. Set distinct `model.slug` values so their result
+directories do not overwrite one another. For example, evaluate the fixed and
+class-name prompts on Countix with:
+
+```bash
+video-repetition-benchmark dataset=countix prompt=count_repetitions model.served_name=qwen3-vl-8b generation.response_fields='[count]' generation.temperature=0
+video-repetition-benchmark dataset=countix prompt=count_repetitions model.served_name=countix-lora model.slug=qwen3-vl-8b-countix-lora generation.response_fields='[count]' generation.temperature=0
+video-repetition-benchmark dataset=countix prompt=count_class_action model.served_name=countix-lora model.slug=qwen3-vl-8b-countix-lora generation.response_fields='[count]' generation.temperature=0
+```
+
+For the description prompt, use a dataset whose test annotations provide valid
+descriptions (for example, OVR-Kinetics) and run the same base/adapter pair with
+`prompt=count_description_action`. The adapter can be loaded under the
+`countix-lora` alias while the base model remains available under
+`qwen3-vl-8b`.
 
 Install vLLM separately using its [installation guide](https://docs.vllm.ai/en/stable/getting_started/installation/).
 The three configured model IDs are:

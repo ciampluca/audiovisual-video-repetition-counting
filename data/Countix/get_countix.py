@@ -4,13 +4,13 @@
 Expected project layout::
 
     Countix/
-    ├── get_countix_videos_20260925_v1.py
+    ├── get_countix.py
     ├── orig_anns/
     │   ├── Countix_train.csv
     │   ├── Countix_val.csv
     │   └── Countix_test.csv
     ├── kinetics_clips/       # searched recursively
-    ├── videos/               # created and populated
+    ├── full_clip_videos/               # created and populated
     └── missing_videos.csv    # created or replaced
 
 The annotation CSVs identify clips through ``video_id``, ``kinetics_start``
@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Copy Countix clips from a recursively searched kinetics_clips "
-            "directory into videos/."
+            "directory into full_clip_videos/."
         )
     )
     parser.add_argument(
@@ -109,7 +109,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--videos-dir",
         type=Path,
-        default=SCRIPT_DIR / "videos",
+        default=SCRIPT_DIR / "full_clip_videos",
         help="Video output directory (default: <script_dir>/videos)",
     )
     parser.add_argument(

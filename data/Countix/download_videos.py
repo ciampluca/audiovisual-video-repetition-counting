@@ -4,15 +4,15 @@
 Expected project layout::
 
     project/
-    ├── download_missing_countix_videos_20260925_v2.py
+    ├── download_videos.py
     ├── missing_videos.csv
-    ├── videos/
+    ├── full_clip_videos/
     └── final_missing_videos.csv
 
-The input report is produced by ``get_countix_videos_20260925_v1.py`` and must
+The input report is produced by ``get_countix.py`` and must
 contain ``video_id``, ``kinetics_start`` and ``kinetics_end``. A row such as
 video_id=dyzWet-ZFx4, start=78 and end=88 is downloaded as
-``videos/dyzWet-ZFx4_000078_000088.mp4``.
+``full_clip_videos/dyzWet-ZFx4_000078_000088.mp4``.
 
 Every valid input row is processed independently. The script is safe to resume:
 valid existing clips are skipped, invalid files are removed and downloaded
@@ -83,8 +83,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--videos-dir",
         type=Path,
-        default=SCRIPT_DIR / "videos",
-        help="Output directory (default: videos/ beside this script)",
+        default=SCRIPT_DIR / "full_clip_videos",
+        help="Output directory (default: full_clip_videos/)",
     )
     parser.add_argument(
         "--final-missing-csv",
