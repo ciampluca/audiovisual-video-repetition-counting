@@ -12,7 +12,7 @@ from typing import Any
 from lvlm_video_repetition_benchmark.datasets import Annotation, load_annotations
 from lvlm_video_repetition_benchmark.metrics import compute_metrics
 from lvlm_video_repetition_benchmark.parsing import parse_response
-from lvlm_video_repetition_benchmark.prompting import compose_prompt
+from lvlm_video_repetition_benchmark.prompting import compose_prompt, render_prompt
 from lvlm_video_repetition_benchmark.video import sample_video
 
 
@@ -36,6 +36,30 @@ def _normalize_response_fields(response_fields: Any) -> tuple[str, ...]:
     return fields
 
 
+def _resolve_action_description_source(
+    response_fields: tuple[str, ...],
+    context_fields: tuple[str, ...],
+    configured_source: str | None,
+) -> str | None:
+    if "action_description" not in response_fields:
+        return None
+    supported_sources = {"description", "class_name"}
+    if configured_source is not None:
+        if configured_source not in supported_sources:
+            raise ValueError(
+                "training.action_description_source must be 'description' "
+                "or 'class_name'"
+            )
+        return configured_source
+    prompt_sources = [field for field in context_fields if field in supported_sources]
+    if len(prompt_sources) != 1:
+        raise ValueError(
+            "Set training.action_description_source explicitly or select a prompt "
+            "with exactly one description/class_name context field"
+        )
+    return prompt_sources[0]
+
+
 class CountTrainingDataset:
     def __init__(
         self,
@@ -44,8 +68,16 @@ class CountTrainingDataset:
         max_train_samples: int | None = None,
         response_fields: tuple[str, ...] = ("count",),
         split_name: str = "training",
+        context_fields: tuple[str, ...] = (),
+        action_description_source: str | None = None,
     ) -> None:
         self.response_fields = _normalize_response_fields(response_fields)
+        self.context_fields = tuple(context_fields)
+        self.action_description_source = _resolve_action_description_source(
+            self.response_fields,
+            self.context_fields,
+            action_description_source,
+        )
         if max_train_samples is not None and max_train_samples <= 0:
             raise ValueError("max_train_samples must be positive when provided")
         selected_annotations = (
@@ -77,16 +109,11 @@ class CountTrainingDataset:
                 "JSON count supervision requires integer counts; invalid rows: "
                 + ", ".join(non_integer_counts[:5])
             )
-        if "action_description" in self.response_fields:
+        if self.action_description_source is not None:
             missing_descriptions = [
                 annotation.annotation_id
                 for annotation in selected_annotations
-                if not any(
-                    isinstance(value, str)
-                    and value.strip()
-                    and value.strip().casefold() != "unknown"
-                    for value in (annotation.description, annotation.class_name)
-                )
+                if not self._valid_description_source(annotation)
             ]
             if missing_descriptions:
                 raise ValueError(
@@ -108,18 +135,22 @@ class CountTrainingDataset:
             if field == "count":
                 target[field] = int(annotation.gt_count)
             else:
-                target[field] = next(
-                    value.strip()
-                    for value in (annotation.description, annotation.class_name)
-                    if isinstance(value, str)
-                    and value.strip()
-                    and value.strip().casefold() != "unknown"
-                )
+                target[field] = getattr(annotation, self.action_description_source).strip()
         return {
             "video_path": str(annotation.video_path),
-            "prompt": self.prompt,
+            "prompt": render_prompt(
+                self.prompt, annotation, context_fields=self.context_fields
+            ),
             "target": json.dumps(target, separators=(",", ":")),
         }
+
+    def _valid_description_source(self, annotation: Annotation) -> bool:
+        value = getattr(annotation, self.action_description_source, None)
+        return (
+            isinstance(value, str)
+            and bool(value.strip())
+            and value.strip().casefold() != "unknown"
+        )
 
 
 class Qwen3VLCountCollator:
@@ -257,12 +288,12 @@ def _validation_count_metrics(
             for ground_truth, prediction in zip(ground_truth_counts, predicted_counts)
         ]
     )
-    if metrics["nmae"] is None:
-        raise ValueError("NMAE is undefined because validation mean count is zero")
+    if metrics["mae_percent"] is None:
+        raise ValueError("NMAE is undefined because validation has no positive counts")
     return {
         "n": int(metrics["n"]),
         "mae": float(metrics["legacy_mae_count"]),
-        "nmae": float(metrics["nmae"]),
+        "mae_percent": float(metrics["mae_percent"]),
         "obo_percent": float(metrics["obo_percent"]),
     }
 
@@ -305,9 +336,16 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
         raise ValueError(f"LoRA training must use the train split, got {split!r}")
 
     response_fields = _normalize_response_fields(cfg.training.response_fields)
-    prompt = compose_prompt(
-        str(cfg.prompt.text), response_fields=response_fields
+    configured_context_fields = getattr(cfg.prompt, "context_fields", ()) or ()
+    if isinstance(configured_context_fields, str):
+        configured_context_fields = (configured_context_fields,)
+    context_fields = tuple(str(field) for field in configured_context_fields)
+    action_description_source = getattr(
+        cfg.training, "action_description_source", None
     )
+    if action_description_source is not None:
+        action_description_source = str(action_description_source)
+    prompt = str(cfg.prompt.text)
     train_dataset = CountTrainingDataset(
         annotations,
         prompt,
@@ -318,6 +356,8 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
         ),
         response_fields=response_fields,
         split_name="training",
+        context_fields=context_fields,
+        action_description_source=action_description_source,
     )
     validation_split = str(cfg.data.validation_split)
     if validation_split != "val":
@@ -337,6 +377,8 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
         prompt,
         response_fields=response_fields,
         split_name="validation",
+        context_fields=context_fields,
+        action_description_source=action_description_source,
     )
     logger.info(
         "Training on %d rows from %s; validating on %d rows from %s with fields %s",
@@ -431,6 +473,7 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
             self.history_path = output_dir / "validation_metrics.csv"
             self.best_path = output_dir / "best_metrics.json"
             self.best_records: dict[str, Any] = {"nmae": None, "obo": None}
+            self.trainer: Any | None = None
             if cfg.training.resume_from_checkpoint and self.best_path.is_file():
                 self.best_records.update(json.loads(self.best_path.read_text(encoding="utf-8")))
 
@@ -493,7 +536,7 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
             with self.history_path.open("a", encoding="utf-8", newline="") as csv_file:
                 writer = csv.DictWriter(
                     csv_file,
-                    fieldnames=("epoch", "n", "mae", "nmae", "obo_percent"),
+                    fieldnames=("epoch", "n", "mae", "mae_percent", "obo_percent"),
                 )
                 if write_header:
                     writer.writeheader()
@@ -503,19 +546,30 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
                 "Validation epoch %d: MAE=%.4f NMAE=%.4f OBO=%.2f%% (%d videos)",
                 epoch,
                 metrics["mae"],
-                metrics["nmae"],
+                metrics["mae_percent"],
                 metrics["obo_percent"],
                 metrics["n"],
             )
+            if self.trainer is None:
+                raise RuntimeError("Validation callback is not attached to Trainer")
+            self.trainer.log(
+                {
+                    "validation/mae_percent": metrics["mae_percent"],
+                    "validation/obo_percent": metrics["obo_percent"],
+                }
+            )
             current_nmae = self.best_records["nmae"]
             current_obo = self.best_records["obo"]
-            better_nmae = current_nmae is None or metrics["nmae"] < current_nmae["nmae"]
+            better_nmae = (
+                current_nmae is None
+                or metrics["mae_percent"] < current_nmae["mae_percent"]
+            )
             better_obo = (
                 current_obo is None
                 or metrics["obo_percent"] > current_obo["obo_percent"]
                 or (
                     metrics["obo_percent"] == current_obo["obo_percent"]
-                    and metrics["nmae"] < current_obo["nmae"]
+                    and metrics["mae_percent"] < current_obo["mae_percent"]
                 )
             )
             for metric_name, is_better in (("nmae", better_nmae), ("obo", better_obo)):
@@ -548,6 +602,7 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
         weight_decay=float(cfg.training.weight_decay),
         warmup_ratio=float(cfg.training.warmup_ratio),
         logging_steps=int(cfg.training.logging_steps),
+        logging_dir=str(output_dir / "runs"),
         save_strategy="epoch",
         save_total_limit=int(cfg.training.save_total_limit),
         bf16=use_bf16,
@@ -557,17 +612,19 @@ def train_qwen3_vl_lora(cfg: Any) -> None:
         optim="paged_adamw_8bit" if quantization_config is not None else "adamw_torch",
         dataloader_num_workers=0,
         remove_unused_columns=False,
-        report_to="none",
+        report_to=["tensorboard"],
         seed=int(cfg.training.seed),
     )
+    validation_callback = GenerationValidationCallback()
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         data_collator=data_collator,
         processing_class=processor,
-        callbacks=[GenerationValidationCallback()],
+        callbacks=[validation_callback],
     )
+    validation_callback.trainer = trainer
     trainer.train(resume_from_checkpoint=cfg.training.resume_from_checkpoint or None)
     trainer.save_model(str(output_dir))
     processor.save_pretrained(str(output_dir))

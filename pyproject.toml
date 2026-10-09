@@ -30,6 +30,7 @@ train = [
     "bitsandbytes>=0.45",
     "peft>=0.18,<1",
     "pillow>=10",
+    "tensorboard>=2.14,<3",
     "transformers>=4.57.1,<5",
 ]
 

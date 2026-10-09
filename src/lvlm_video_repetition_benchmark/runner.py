@@ -93,7 +93,6 @@ METRIC_COLUMNS = [
     "run_status",
     "n_total",
     "n_valid_predictions",
-    "nmae",
     "mae_n",
     "mae_percent",
     "legacy_mae_count",

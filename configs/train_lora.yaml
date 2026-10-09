@@ -23,6 +23,7 @@ lora:
 
 training:
   response_fields: [count]
+  action_description_source: null
   seed: 42
   epochs: 3
   max_steps: -1

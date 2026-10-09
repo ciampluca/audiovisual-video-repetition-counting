@@ -34,7 +34,6 @@ def compute_metrics(rows: Iterable[dict[str, Any]]) -> dict[str, float | int | N
             "n": 0,
             "mae_n": 0,
             "mae_percent": None,
-            "nmae": None,
             "legacy_mae_count": None,
             "rmse_count": None,
             "obz_percent": None,
@@ -59,12 +58,6 @@ def compute_metrics(rows: Iterable[dict[str, Any]]) -> dict[str, float | int | N
         if float(row["gt_count"]) > 0
     ]
     count = len(valid_rows)
-    mean_gt_count = sum(float(row["gt_count"]) for row in valid_rows) / count
-    normalized_mae = (
-        sum(absolute_errors) / count / mean_gt_count
-        if mean_gt_count > 0
-        else None
-    )
 
     metrics: dict[str, float | int | None] = {
         "n": count,
@@ -72,7 +65,6 @@ def compute_metrics(rows: Iterable[dict[str, Any]]) -> dict[str, float | int | N
         "mae_percent": 100.0 * sum(relative_errors) / len(relative_errors)
         if relative_errors
         else None,
-        "nmae": normalized_mae,
         "legacy_mae_count": sum(absolute_errors) / count,
         "rmse_count": sqrt(sum(error * error for error in errors) / count),
         "obz_percent": 100.0 * sum(error == 0 for error in absolute_errors) / count,
