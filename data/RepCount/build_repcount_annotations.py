@@ -15,7 +15,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 ORIG_ANNS_DIR = SCRIPT_DIR / "orig_anns"
 ANNOTATIONS_DIR = SCRIPT_DIR / "annotations"
-VIDEOS_DIR = SCRIPT_DIR / "videos"
+VIDEOS_DIR = SCRIPT_DIR / "videos_with_audio"
 LOG_CSV = SCRIPT_DIR / "missing_videos.csv"
 
 SPLITS = ("train", "val", "test")
@@ -151,7 +151,7 @@ def process_split(
 
             video_path = VIDEOS_DIR / video_name
             if not video_path.is_file():
-                log_writer.writerow([split, video_name, "Video file does not exist in 'videos/' folder"])
+                log_writer.writerow([split, video_name, "Video file does not exist in 'videos_with_audio/' folder"])
                 skipped_count += 1
                 continue
 
@@ -238,7 +238,7 @@ def main() -> int:
         return 1
 
     if not VIDEOS_DIR.is_dir():
-        print(f"Error: Directory 'videos' does not exist at path:\n{VIDEOS_DIR}", file=sys.stderr)
+        print(f"Error: Directory 'videos_with_audio' does not exist at path:\n{VIDEOS_DIR}", file=sys.stderr)
         return 1
 
     ffprobe_path = shutil.which("ffprobe")

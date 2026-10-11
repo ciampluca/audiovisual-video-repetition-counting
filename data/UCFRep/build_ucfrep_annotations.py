@@ -11,8 +11,8 @@ from tqdm import tqdm
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ORIG_ANNS_DIR = os.path.join(SCRIPT_DIR, 'orig_anns')
-VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'videos')
-OUT_ANNS_DIR = os.path.join(SCRIPT_DIR, 'annotations')
+VIDEOS_DIR = os.path.join(SCRIPT_DIR, 'full_clip_videos')
+OUT_ANNS_DIR = os.path.join(SCRIPT_DIR, 'full_clip_annotations')
 REJECTED_CSV = os.path.join(SCRIPT_DIR, 'rejected_rows.csv')
 
 FILES_TO_PROCESS = ['ucfrep_train.csv', 'ucfrep_val.csv']

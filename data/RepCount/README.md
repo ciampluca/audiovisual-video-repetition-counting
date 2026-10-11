@@ -1,5 +1,6 @@
 To generate final annotations run in the following order:
 1. build_repcount_annotations.py
+2. extract_repcount_video_only.py
 
 To extract audio tracks, run:
 2. extract_repcount_audio.py

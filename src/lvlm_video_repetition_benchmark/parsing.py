@@ -42,7 +42,6 @@ def parse_response(
             len(set(selected_fields)) != len(selected_fields)
             or "count" not in selected_fields
             or set(selected_fields) - required_fields
-            or fields - localization_fields != set(selected_fields)
         ):
             return None
     has_localization = localization_fields.issubset(fields)
@@ -53,14 +52,10 @@ def parse_response(
     reasoning = payload.get("reasoning", "")
     if type(count) is not int or count < 0:
         return None
-    if "action_description" in fields and (
-        not isinstance(action_description, str) or not action_description.strip()
-    ):
-        return None
-    if "reasoning" in fields and (
-        not isinstance(reasoning, str) or not reasoning.strip()
-    ):
-        return None
+    if not isinstance(action_description, str):
+        action_description = ""
+    if not isinstance(reasoning, str):
+        reasoning = ""
 
     sequence_start_fraction = None
     sequence_end_fraction = None

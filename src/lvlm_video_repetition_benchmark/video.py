@@ -68,6 +68,48 @@ def _uniform_sample_indices(candidate_count: int, sample_count: int) -> list[int
     ]
 
 
+def _select_source_frames(
+    candidate_timestamps: list[float],
+    source_fps: float,
+    total_num_frames: int,
+    max_frames: int,
+) -> tuple[list[int], list[int], int, str]:
+    candidate_positions: list[int] = []
+    source_indices: list[int] = []
+    seen_source_indices: set[int] = set()
+    for position, timestamp in enumerate(candidate_timestamps):
+        source_index = min(
+            max(round(timestamp * source_fps), 0),
+            max(total_num_frames - 1, 0),
+        )
+        if source_index not in seen_source_indices:
+            seen_source_indices.add(source_index)
+            candidate_positions.append(position)
+            source_indices.append(source_index)
+
+    candidate_frame_count = len(source_indices)
+    source_limited = candidate_frame_count < len(candidate_timestamps)
+    if candidate_frame_count < 2:
+        if total_num_frames < 2:
+            raise RuntimeError(
+                "Video contains fewer than two source frames; repetition counting "
+                "requires at least two distinct frames"
+            )
+        return [0, total_num_frames - 1], [], candidate_frame_count, "minimum_two_frames"
+
+    if candidate_frame_count > max_frames:
+        selected_indices = _uniform_sample_indices(candidate_frame_count, max_frames)
+        candidate_positions = [candidate_positions[index] for index in selected_indices]
+        source_indices = [source_indices[index] for index in selected_indices]
+        sampling_mode = (
+            "source_limited_uniform_fallback" if source_limited else "uniform_fallback"
+        )
+    else:
+        sampling_mode = "source_limited" if source_limited else "fps"
+
+    return source_indices, candidate_positions, candidate_frame_count, sampling_mode
+
+
 def _frame_timestamps(stderr: bytes) -> list[float]:
     return [
         float(value)
@@ -78,8 +120,8 @@ def _frame_timestamps(stderr: bytes) -> list[float]:
 def sample_video(video_path: Path, sampling_fps: float, max_frames: int) -> VideoSample:
     if sampling_fps <= 0:
         raise ValueError("sampling_fps must be greater than zero")
-    if max_frames <= 0:
-        raise ValueError("max_frames must be greater than zero")
+    if max_frames < 2:
+        raise ValueError("max_frames must be at least two for repetition counting")
     if not video_path.is_file():
         raise FileNotFoundError(f"Video file not found: {video_path}")
 
@@ -141,21 +183,29 @@ def sample_video(video_path: Path, sampling_fps: float, max_frames: int) -> Vide
         raise RuntimeError(f"ffmpeg timestamp scan failed for {video_path}: {error_text}")
 
     candidate_timestamps = _frame_timestamps(timestamp_pass.stderr)
-    candidate_frame_count = len(candidate_timestamps)
-    if candidate_frame_count == 0:
-        raise RuntimeError(f"No frames sampled from {video_path} at {sampling_fps:g} FPS")
-
-    sampling_mode = "fps"
-    selected_timestamps = candidate_timestamps
-    video_filter = f"fps={sampling_fps:g},showinfo"
-    if candidate_frame_count > max_frames:
-        selected_indices = _uniform_sample_indices(candidate_frame_count, max_frames)
-        selected_timestamps = [candidate_timestamps[index] for index in selected_indices]
-        select_expression = "+".join(f"eq(n\\,{index})" for index in selected_indices)
-        video_filter = (
-            f"fps={sampling_fps:g},select='{select_expression}',showinfo"
+    selected_source_indices, selected_candidate_positions, candidate_frame_count, sampling_mode = (
+        _select_source_frames(
+            candidate_timestamps,
+            source_fps,
+            total_num_frames,
+            max_frames,
         )
-        sampling_mode = "uniform_fallback"
+    )
+
+    if sampling_mode == "minimum_two_frames":
+        select_expression = "+".join(
+            f"eq(n\\,{index})" for index in selected_source_indices
+        )
+        video_filter = f"select='{select_expression}',showinfo"
+    elif selected_candidate_positions == list(range(len(candidate_timestamps))):
+        video_filter = f"fps={sampling_fps:g},showinfo"
+    else:
+        select_expression = "+".join(
+            f"eq(n\\,{index})" for index in selected_candidate_positions
+        )
+        video_filter = f"fps={sampling_fps:g},select='{select_expression}',showinfo"
+
+    if sampling_mode in {"uniform_fallback", "source_limited_uniform_fallback"}:
         logger.warning(
             "Video %s produced %d frames at %.3g FPS, exceeding the limit of %d; "
             "uniformly sampling across the full video.",
@@ -178,7 +228,7 @@ def sample_video(video_path: Path, sampling_fps: float, max_frames: int) -> Vide
             "-vf",
             video_filter,
             "-frames:v",
-            str(len(selected_timestamps)),
+            str(len(selected_source_indices)),
             "-vsync",
             "0",
             "-f",
@@ -195,25 +245,17 @@ def sample_video(video_path: Path, sampling_fps: float, max_frames: int) -> Vide
         raise RuntimeError(f"ffmpeg frame extraction failed for {video_path}: {error_text}")
 
     frames = split_jpeg_frames(sampled.stdout)
-    if len(frames) != len(selected_timestamps):
+    if len(frames) != len(selected_source_indices):
         raise RuntimeError(
             f"FFmpeg selected {len(frames)} frames for {video_path}; "
-            f"expected {len(selected_timestamps)}"
+            f"expected {len(selected_source_indices)}"
         )
-
-    timestamps = _frame_timestamps(sampled.stderr)
-    if len(timestamps) != len(frames):
-        timestamps = selected_timestamps
-    frames_indices = [
-        min(max(round(timestamp * source_fps), 0), max(total_num_frames - 1, 0))
-        for timestamp in timestamps
-    ]
 
     encoded_frames = ",".join(base64.b64encode(frame).decode("ascii") for frame in frames)
     return VideoSample(
         video_data_uri=f"data:video/jpeg;base64,{encoded_frames}",
         source_fps=source_fps,
-        frames_indices=frames_indices,
+        frames_indices=selected_source_indices,
         total_num_frames=total_num_frames,
         duration=duration,
         sampled_frame_count=len(frames),

@@ -112,7 +112,7 @@ video-repetition-benchmark
 Select another dataset, model, or prompt with Hydra config groups:
 
 ```bash
-video-repetition-benchmark dataset=ucfrep model=internvl3_9b prompt=count_complete_cycles
+video-repetition-benchmark dataset=ucfrep model=internvl3_9b prompt=count_action_specific_repetitions
 ```
 
 Use the class-conditioned prompt with a dataset whose selected annotation CSV
@@ -164,7 +164,7 @@ Run a dataset/prompt/FPS sweep against the model currently loaded by vLLM:
 ```bash
 video-repetition-benchmark --multirun \
   dataset=countix,repcount,ucfrep,ovr_kinetics,ovr_ego4d \
-  prompt=count_repetitions,count_complete_cycles,count_full_video,count_class_action,count_description_action \
+  prompt=count_repetitions,count_motion_pattern,count_action_specific_repetitions,count_class_action,count_description_action \
   sampling.fps=0.5,1,2
 ```
 
