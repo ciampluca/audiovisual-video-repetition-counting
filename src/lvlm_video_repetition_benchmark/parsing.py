@@ -11,6 +11,9 @@ class ParsedResponse:
     count: int
     action_description: str
     reasoning: str
+    window_counts: tuple[int, ...] | None = None
+    window_count_sum: int | None = None
+    window_count_consistent: bool | None = None
     sequence_start_fraction: float | None = None
     sequence_end_fraction: float | None = None
     localization_error: str | None = None
@@ -20,6 +23,7 @@ def parse_response(
     response: str,
     require_localization: bool = False,
     expected_fields: Iterable[str] | None = None,
+    expected_window_count: int | None = None,
 ) -> ParsedResponse | None:
     try:
         payload = json.loads(response)
@@ -28,12 +32,18 @@ def parse_response(
 
     required_fields = {"count", "action_description", "reasoning"}
     localization_fields = {"sequence_start_fraction", "sequence_end_fraction"}
+    supported_fields = required_fields | localization_fields
+    if expected_window_count is not None:
+        if expected_window_count < 1:
+            return None
+        supported_fields.add("windows")
     if not isinstance(payload, dict):
         return None
     fields = set(payload)
     if (
         "count" not in fields
-        or fields - required_fields - localization_fields
+        or fields - supported_fields
+        or (expected_window_count is not None and "windows" not in fields)
     ):
         return None
     if expected_fields is not None:
@@ -41,7 +51,8 @@ def parse_response(
         if (
             len(set(selected_fields)) != len(selected_fields)
             or "count" not in selected_fields
-            or set(selected_fields) - required_fields
+            or set(selected_fields) - (required_fields | ({"windows"} if expected_window_count is not None else set()))
+            or (expected_window_count is not None and "windows" not in selected_fields)
         ):
             return None
     has_localization = localization_fields.issubset(fields)
@@ -56,6 +67,21 @@ def parse_response(
         action_description = ""
     if not isinstance(reasoning, str):
         reasoning = ""
+
+    window_counts = None
+    window_count_sum = None
+    window_count_consistent = None
+    if expected_window_count is not None:
+        raw_window_counts = payload["windows"]
+        if (
+            not isinstance(raw_window_counts, list)
+            or len(raw_window_counts) != expected_window_count
+            or any(type(window_count) is not int or window_count < 0 for window_count in raw_window_counts)
+        ):
+            return None
+        window_counts = tuple(raw_window_counts)
+        window_count_sum = sum(window_counts)
+        window_count_consistent = window_count_sum == count
 
     sequence_start_fraction = None
     sequence_end_fraction = None
@@ -90,6 +116,9 @@ def parse_response(
         count=count,
         action_description=action_description.strip(),
         reasoning=reasoning.strip(),
+        window_counts=window_counts,
+        window_count_sum=window_count_sum,
+        window_count_consistent=window_count_consistent,
         sequence_start_fraction=sequence_start_fraction,
         sequence_end_fraction=sequence_end_fraction,
         localization_error=localization_error,

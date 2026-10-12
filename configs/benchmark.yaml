@@ -1,36 +1,41 @@
 defaults:
-  - dataset: countix
-  - model: qwen3_vl_8b
-  - prompt: count_repetitions
-  - localization: global_sequence
+  - dataset: countix # Options: countix, repcount, ucfrep, ovr_kinetics, ovr_ego4d.
+  - model: qwen3_vl_8b # Options: qwen3_vl_8b, llava_onevision_7b, internvl3_9b.
+  - prompt: count_repetitions # Options: see configs/prompt/; conditioned prompts require matching annotation text.
+  - localization: global_sequence # Options: none (count only), global_sequence (one interval for the full action sequence).
   - _self_
 
 paths:
-  workspace_root: ${hydra:runtime.cwd}
-  output_root: ${paths.workspace_root}/results
+  workspace_root: ${hydra:runtime.cwd} # Project root; defaults to the directory where the command is launched.
+  output_root: ${paths.workspace_root}/results # Root directory for benchmark outputs.
 
 runtime:
-  base_url: http://localhost:8000/v1
-  api_key: EMPTY
-  timeout_seconds: 600
-  max_retries: 2
-  retry_backoff_seconds: 1.0
-  max_concurrent_requests: 8
+  base_url: http://localhost:8000/v1 # OpenAI-compatible vLLM API base URL.
+  api_key: EMPTY # API key sent to the server; vLLM commonly accepts EMPTY for local serving.
+  timeout_seconds: 600 # Request timeout in seconds.
+  max_retries: 2 # Retries for transient connection, timeout, HTTP 429, and HTTP 5xx errors.
+  retry_backoff_seconds: 1.0 # Initial exponential-backoff delay; set to 0 to disable waiting.
+  max_concurrent_requests: 8 # Maximum in-flight model requests; lower this if server or host memory is constrained.
 
 benchmark:
-  seeds: [13, 17, 23, 42, 99]
+  seeds: [13, 17, 23, 42, 99] # Inference seeds; one prediction is produced per annotation and seed.
 
 sampling:
-  fps: 10.0
-  max_frames: 3000
+  fps: 10.0 # Requested sampling rate; must be positive. If over the cap, frames are uniformly subsampled.
+  max_frames: 3000 # Maximum sampled frames per video; must be at least 2.
 
 generation:
-  temperature: 0.2
-  max_tokens: 128
-  response_fields: [count]
+  temperature: 0.2 # Sampling temperature; 0 is greedy decoding, and values must be non-negative.
+  max_tokens: 128 # Maximum generated tokens; windows and step_by_step reasoning apply a larger effective minimum when needed.
+  response_fields: [count] # Supported fields: count, action_description, reasoning. count is required; step_by_step adds reasoning automatically.
+  reasoning_mode: none # Options: none (legacy prompt) or step_by_step (structured count procedure plus reasoning output).
+  temporal_windows:
+    enabled: false # Opt in to total-plus-window counts; windows is added to response_fields automatically.
+    window_seconds: 5.0 # Window width in seconds; the final window ends at the video duration.
+    consistency_retries: 1 # Recount after a valid response whose window counts do not sum to count.
 
 hydra:
   run:
-    dir: ${paths.workspace_root}/.hydra_runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${paths.workspace_root}/.hydra_runs/${now:%Y-%m-%d}/${now:%H-%M-%S} # Per-run Hydra configuration/log directory.
   job:
-    chdir: false
+    chdir: false # Keep paths relative to the project root rather than changing into the run directory.

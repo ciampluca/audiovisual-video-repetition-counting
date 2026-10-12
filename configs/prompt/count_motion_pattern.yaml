@@ -1,5 +1,6 @@
-name: Count Motion Pattern
-slug: count-motion-pattern
+name: Count Motion Pattern # Display name recorded in results.
+slug: count-motion-pattern # Stable prompt identifier used in result paths.
+# Explicitly defines a complete cycle and prohibits extrapolating unseen repetitions.
 text: >-
   Watch the entire video and identify the main recurring action. Track its
   recurring motion pattern and count one repetition only after one complete

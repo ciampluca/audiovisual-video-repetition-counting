@@ -1,4 +1,4 @@
-name: OVR-Kinetics
-slug: ovr-kinetics
-folder: OVR-Kinetics
-annotation_prefix: ovr_kinetics
+name: OVR-Kinetics # Display name used in logs and CSV outputs.
+slug: ovr-kinetics # Stable dataset identifier used in result paths.
+folder: OVR-Kinetics # Directory under data/ containing this dataset.
+annotation_prefix: ovr_kinetics # Prefix used to discover the annotation CSV for the selected split.

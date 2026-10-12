@@ -1,4 +1,4 @@
-name: Count Only
-slug: none
-enabled: false
-instruction: ""
+name: Count Only # Display name for count-only runs.
+slug: none # No localization suffix is added to the prompt ID.
+enabled: false # Disables sequence-boundary prediction.
+instruction: "" # No additional localization instruction.

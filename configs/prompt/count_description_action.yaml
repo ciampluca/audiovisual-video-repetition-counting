@@ -1,5 +1,5 @@
-name: Count Description Action
-slug: count-description-action
+name: Count Description Action # Display name recorded in results.
+slug: count-description-action # Stable prompt identifier used in result paths.
 context_fields:
-  - description
-text: 'Count the number of complete visible repetitions of the target action in the video. The target action description is: "{description}". Use the description only to identify which action to count. Base the count on visible evidence in the video; do not infer it from the wording or assume the description gives the correct count. Count each complete repetition once and ignore other actions. If the target action is not visible, return a count of 0.'
+  - description # Required annotation field; the runner skips rows with blank or unknown values.
+text: 'Count the number of complete visible repetitions of the target action in the video. The target action description is: "{description}". Use the description only to identify which action to count. Base the count on visible evidence in the video; do not infer it from the wording or assume the description gives the correct count. Count each complete repetition once and ignore other actions. If the target action is not visible, return a count of 0.' # Uses description only to identify the target action, not to infer its count.

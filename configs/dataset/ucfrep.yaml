@@ -1,4 +1,4 @@
-name: UCFRep
-slug: ucfrep
-folder: UCFRep
-annotation_prefix: ucfrep
+name: UCFRep # Display name used in logs and CSV outputs.
+slug: ucfrep # Stable dataset identifier used in result paths.
+folder: UCFRep # Directory under data/ containing this dataset.
+annotation_prefix: ucfrep # Prefix used to discover the annotation CSV for the selected split.

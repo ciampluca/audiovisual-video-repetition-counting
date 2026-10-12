@@ -1,4 +1,4 @@
-name: OVR-Ego4d
-slug: ovr-ego4d
-folder: OVR-Ego4d
-annotation_prefix: ovr_ego4d
+name: OVR-Ego4d # Display name used in logs and CSV outputs.
+slug: ovr-ego4d # Stable dataset identifier used in result paths.
+folder: OVR-Ego4d # Directory under data/ containing this dataset.
+annotation_prefix: ovr_ego4d # Prefix used to discover the annotation CSV for the selected split.

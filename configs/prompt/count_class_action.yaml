@@ -1,5 +1,5 @@
-name: Count Class Action
-slug: count-class-action
+name: Count Class Action # Display name recorded in results.
+slug: count-class-action # Stable prompt identifier used in result paths.
 context_fields:
-  - class_name
-text: 'The target action class is "{class_name}". Watch the entire video and count the complete repetitions of this action across the video. Count each complete repetition once and ignore other actions. Determine the count from visible motion; do not infer it from the class name. If the target action is not visible, return a count of 0.'
+  - class_name # Required annotation field; the runner skips rows with blank or unknown values.
+text: 'The target action class is "{class_name}". Watch the entire video and count the complete repetitions of this action across the video. Count each complete repetition once and ignore other actions. Determine the count from visible motion; do not infer it from the class name. If the target action is not visible, return a count of 0.' # Uses class_name only to identify the target action, not to infer its count.

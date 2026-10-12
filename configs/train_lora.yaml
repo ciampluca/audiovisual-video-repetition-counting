@@ -1,50 +1,50 @@
 defaults:
-  - dataset: countix
-  - model: qwen3_vl_8b
-  - prompt: count_repetitions
+  - dataset: countix # The initial recipe targets Countix; training code requires the train split.
+  - model: qwen3_vl_8b # The trainer currently supports Qwen3-VL-8B-Instruct.
+  - prompt: count_repetitions # Prompt text used for training and validation.
   - _self_
 
 paths:
-  workspace_root: ${hydra:runtime.cwd}
-  output_dir: ${paths.workspace_root}/adapters/${model.slug}-countix-lora
+  workspace_root: ${hydra:runtime.cwd} # Project root; defaults to the directory where the command is launched.
+  output_dir: ${paths.workspace_root}/adapters/${model.slug}-countix-lora # Final adapter, checkpoints, and validation records.
 
 data:
-  split: train
-  validation_split: val
-  sampling_fps: 10.0
-  max_frames: 3000
-  max_train_samples: null
+  split: train # Training annotations; the trainer rejects other splits.
+  validation_split: val # Held-out model-selection split; the trainer requires val.
+  sampling_fps: 10.0 # Video frames sampled per second during training and validation.
+  max_frames: 3000 # Per-video frame cap; videos above it are uniformly subsampled.
+  max_train_samples: null # null uses all training rows; a positive integer limits rows for a smoke run.
 
 lora:
-  rank: 16
-  alpha: 32
-  dropout: 0.05
-  target_modules: '^model\.language_model\.layers\.[0-9]+\.self_attn\.(q_proj|k_proj|v_proj|o_proj)$'
+  rank: 16 # LoRA adapter rank.
+  alpha: 32 # LoRA scaling factor.
+  dropout: 0.05 # Dropout applied to LoRA updates.
+  target_modules: '^model\.language_model\.layers\.[0-9]+\.self_attn\.(q_proj|k_proj|v_proj|o_proj)$' # Regex for language-backbone attention projections; vision targets are rejected.
 
 training:
-  response_fields: [count]
-  action_description_source: null
-  seed: 42
-  epochs: 3
-  max_steps: -1
-  gradient_accumulation_steps: 8
-  learning_rate: 0.0002
-  weight_decay: 0.0
-  warmup_ratio: 0.03
-  logging_steps: 10
-  save_total_limit: 2
-  bf16: true
-  gradient_checkpointing: true
-  load_in_4bit: true
-  quant_type: nf4
-  double_quant: true
-  resume_from_checkpoint: null
+  response_fields: [count] # Training supports count and action_description; count is required. reasoning is unsupported.
+  action_description_source: null # null infers the sole prompt context source; otherwise use description or class_name.
+  seed: 42 # Training and validation generation seed.
+  epochs: 3 # Number of dataset passes when max_steps is -1.
+  max_steps: -1 # -1 trains by epochs; a positive value caps optimizer steps.
+  gradient_accumulation_steps: 8 # Micro-batches accumulated before each optimizer update.
+  learning_rate: 0.0002 # Peak optimizer learning rate.
+  weight_decay: 0.0 # AdamW weight decay.
+  warmup_ratio: 0.03 # Fraction of optimizer steps used for learning-rate warmup.
+  logging_steps: 10 # Log every N optimizer steps.
+  save_total_limit: 2 # Maximum Trainer checkpoints retained; best-metric adapters are saved separately.
+  bf16: true # Prefer bfloat16 when the GPU supports it; otherwise training falls back to float16.
+  gradient_checkpointing: true # Trade extra compute for lower activation memory.
+  load_in_4bit: true # Quantize the frozen base model to 4-bit for training; requires bitsandbytes.
+  quant_type: nf4 # 4-bit quantization type supported by bitsandbytes, typically nf4 or fp4.
+  double_quant: true # Apply nested quantization to reduce 4-bit quantization metadata.
+  resume_from_checkpoint: null # null starts a fresh run; set a Trainer checkpoint path to resume.
 
 validation:
-  max_new_tokens: 128
+  max_new_tokens: 128 # Maximum tokens generated for each validation count response.
 
 hydra:
   run:
-    dir: ${paths.workspace_root}/.hydra_runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${paths.workspace_root}/.hydra_runs/${now:%Y-%m-%d}/${now:%H-%M-%S} # Per-run Hydra configuration/log directory.
   job:
-    chdir: false
+    chdir: false # Keep paths relative to the project root rather than changing into the run directory.

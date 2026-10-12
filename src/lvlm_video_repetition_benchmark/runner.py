@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+import json
 import logging
 import math
 from pathlib import Path
@@ -16,6 +17,7 @@ from lvlm_video_repetition_benchmark.metrics import compute_metrics, temporal_io
 from lvlm_video_repetition_benchmark.parsing import parse_response
 from lvlm_video_repetition_benchmark.prompting import (
     PromptContextError,
+    build_temporal_windows,
     compose_prompt,
     render_prompt,
 )
@@ -71,6 +73,7 @@ PREDICTION_COLUMNS = [
     "model_id",
     "prompt_name",
     "prompt_id",
+    "reasoning_mode",
     "localization_name",
     "localization_id",
     "fps",
@@ -85,6 +88,7 @@ METRIC_COLUMNS = [
     "annotation_split",
     "model_name",
     "prompt_name",
+    "reasoning_mode",
     "localization_name",
     "localization_id",
     "fps",
@@ -108,6 +112,52 @@ METRIC_COLUMNS = [
     "end_mae_sec",
     "boundary_mae_sec",
 ]
+
+WINDOW_PREDICTION_COLUMNS = [
+    "window_size_seconds",
+    "window_counts_json",
+    "window_count_sum",
+    "window_count_consistent",
+    "window_consistency_retries",
+    "window_consistency_retry_error",
+]
+
+
+def _prompt_identity(cfg: Any) -> tuple[str, str]:
+    name = str(cfg.prompt.name)
+    slug = str(cfg.prompt.slug)
+    reasoning_mode = str(getattr(cfg.generation, "reasoning_mode", "none"))
+    if reasoning_mode not in {"none", "step_by_step"}:
+        raise ValueError("generation.reasoning_mode must be 'none' or 'step_by_step'")
+    temporal_windows = getattr(cfg.generation, "temporal_windows", None)
+    if bool(getattr(temporal_windows, "enabled", False)):
+        window_seconds = float(getattr(temporal_windows, "window_seconds", 5.0))
+        label = f"{window_seconds:g}s windows"
+        name = f"{name} ({label})"
+        slug = f"{slug}+windows-{window_seconds:g}s"
+    if reasoning_mode == "step_by_step":
+        name = f"{name} (step-by-step reasoning)"
+        slug = f"{slug}+cot-step-by-step"
+
+    configured_fields = getattr(cfg.generation, "response_fields", None)
+    if isinstance(configured_fields, str):
+        configured_fields = (configured_fields,)
+    if configured_fields:
+        effective_fields = tuple(str(field) for field in configured_fields)
+    else:
+        effective_fields = ("count", "action_description", "reasoning")
+    if reasoning_mode == "step_by_step" and "reasoning" not in effective_fields:
+        effective_fields += ("reasoning",)
+    if bool(getattr(temporal_windows, "enabled", False)) and "windows" not in effective_fields:
+        effective_fields += ("windows",)
+    default_fields = ("count", "reasoning") if reasoning_mode == "step_by_step" else ("count",)
+    if bool(getattr(temporal_windows, "enabled", False)):
+        default_fields += ("windows",)
+    if effective_fields != default_fields:
+        fields_label = "-".join(effective_fields)
+        name = f"{name} (fields: {', '.join(effective_fields)})"
+        slug = f"{slug}+fields-{fields_label}"
+    return name, slug
 
 
 def _write_csv(path: Path, columns: list[str], rows: list[dict[str, Any]]) -> None:
@@ -133,6 +183,7 @@ def _result_record(
     video_duration_sec: float | None = None,
 ) -> dict[str, Any]:
     localization_name, localization_slug = _localization_identity(cfg)
+    prompt_name, prompt_slug = _prompt_identity(cfg)
     return {
         "dataset": cfg.dataset.name,
         "annotation_split": annotation.annotation_split,
@@ -165,8 +216,9 @@ def _result_record(
         "seed": seed,
         "model_name": cfg.model.name,
         "model_id": cfg.model.hf_id,
-        "prompt_name": cfg.prompt.name,
-        "prompt_id": cfg.prompt.slug,
+        "prompt_name": prompt_name,
+        "prompt_id": prompt_slug,
+        "reasoning_mode": str(getattr(cfg.generation, "reasoning_mode", "none")),
         "localization_name": localization_name,
         "localization_id": localization_slug,
         "fps": float(cfg.sampling.fps),
@@ -232,6 +284,82 @@ def _generate_with_retries(
             attempt += 1
 
 
+def _generate_with_window_consistency(
+    client: Any,
+    *,
+    video: VideoSample,
+    prompt: str,
+    seed: int,
+    temperature: float,
+    max_tokens: int,
+    max_retries: int,
+    retry_backoff_seconds: float,
+    expected_fields: tuple[str, ...] | None,
+    expected_window_count: int,
+    consistency_retries: int,
+) -> tuple[str, int, str]:
+    windowed_max_tokens = max(max_tokens, 128 + 16 * expected_window_count)
+    raw_response = _generate_with_retries(
+        client,
+        video=video,
+        prompt=prompt,
+        seed=seed,
+        temperature=temperature,
+        max_tokens=windowed_max_tokens,
+        max_retries=max_retries,
+        retry_backoff_seconds=retry_backoff_seconds,
+    )
+    retry_count = 0
+    retry_error = ""
+    parsed = parse_response(
+        raw_response,
+        expected_fields=expected_fields,
+        expected_window_count=expected_window_count,
+    )
+    while (
+        parsed is not None
+        and parsed.window_count_consistent is False
+        and retry_count < consistency_retries
+    ):
+        previous_counts = json.dumps(
+            {"count": parsed.count, "windows": parsed.window_counts},
+            separators=(",", ":"),
+        )
+        correction_prompt = (
+            f"{prompt}\n\nYour previous numeric answer was internally inconsistent: "
+            f"the total was {parsed.count}, but the window counts summed to "
+            f"{parsed.window_count_sum}. Previous answer: {previous_counts}. "
+            "Re-examine the video and independently recount the whole video and every "
+            "window. Return one corrected JSON object in the same format."
+        )
+        try:
+            retry_response = _generate_with_retries(
+                client,
+                video=video,
+                prompt=correction_prompt,
+                seed=seed,
+                temperature=temperature,
+                max_tokens=windowed_max_tokens,
+                max_retries=max_retries,
+                retry_backoff_seconds=retry_backoff_seconds,
+            )
+        except Exception as exc:
+            retry_error = f"{type(exc).__name__}: {exc}"
+            break
+        retry_count += 1
+        retry_parsed = parse_response(
+            retry_response,
+            expected_fields=expected_fields,
+            expected_window_count=expected_window_count,
+        )
+        if retry_parsed is None:
+            retry_error = "Consistency retry returned an invalid response"
+            break
+        raw_response = retry_response
+        parsed = retry_parsed
+    return raw_response, retry_count, retry_error
+
+
 def _write_outputs(
     output_dir: Path,
     prediction_rows: list[dict[str, Any]],
@@ -240,7 +368,10 @@ def _write_outputs(
     cfg: Any,
     run_status: str,
 ) -> None:
-    _write_csv(output_dir / "predictions.csv", PREDICTION_COLUMNS, prediction_rows)
+    prediction_columns = PREDICTION_COLUMNS
+    if bool(getattr(getattr(cfg.generation, "temporal_windows", None), "enabled", False)):
+        prediction_columns = [*PREDICTION_COLUMNS, *WINDOW_PREDICTION_COLUMNS]
+    _write_csv(output_dir / "predictions.csv", prediction_columns, prediction_rows)
     metric_rows: list[dict[str, Any]] = []
     localization_name, localization_slug = _localization_identity(cfg)
     for seed in seeds:
@@ -251,7 +382,8 @@ def _write_outputs(
                 "dataset": cfg.dataset.name,
                 "annotation_split": annotations[0].annotation_split if annotations else "",
                 "model_name": cfg.model.name,
-                "prompt_name": cfg.prompt.name,
+                "prompt_name": _prompt_identity(cfg)[0],
+                "reasoning_mode": str(getattr(cfg.generation, "reasoning_mode", "none")),
                 "localization_name": localization_name,
                 "localization_id": localization_slug,
                 "fps": float(cfg.sampling.fps),
@@ -295,7 +427,20 @@ def run_benchmark(
         raise ValueError("runtime.max_concurrent_requests must be at least one")
 
     workspace_root = Path(cfg.paths.workspace_root).resolve()
-    prompt_slug = str(cfg.prompt.slug)
+    prompt_name, prompt_slug = _prompt_identity(cfg)
+    temporal_windows_cfg = getattr(cfg.generation, "temporal_windows", None)
+    temporal_windows_enabled = bool(getattr(temporal_windows_cfg, "enabled", False))
+    reasoning_mode = str(getattr(cfg.generation, "reasoning_mode", "none"))
+    max_tokens = int(cfg.generation.max_tokens)
+    if reasoning_mode == "step_by_step":
+        max_tokens = max(max_tokens, 256)
+    window_seconds = float(getattr(temporal_windows_cfg, "window_seconds", 5.0))
+    consistency_retries = int(getattr(temporal_windows_cfg, "consistency_retries", 1))
+    if temporal_windows_enabled:
+        if not math.isfinite(window_seconds) or window_seconds <= 0:
+            raise ValueError("generation.temporal_windows.window_seconds must be greater than zero")
+        if consistency_retries < 0:
+            raise ValueError("generation.temporal_windows.consistency_retries must be non-negative")
     localization_cfg = getattr(cfg, "localization", None)
     localization_enabled = bool(getattr(localization_cfg, "enabled", False))
     _, localization_slug = _localization_identity(cfg)
@@ -336,14 +481,24 @@ def run_benchmark(
         response_fields = getattr(cfg.generation, "response_fields", None)
         if isinstance(response_fields, str):
             response_fields = (response_fields,)
-        prompts = {
-            annotation.annotation_id: compose_prompt(
-                render_prompt(str(cfg.prompt.text), annotation, context_fields),
-                localization_instruction if localization_enabled else None,
-                response_fields=response_fields,
+        if not response_fields:
+            response_fields = None
+        base_prompts = {
+            annotation.annotation_id: render_prompt(
+                str(cfg.prompt.text), annotation, context_fields
             )
             for annotation in annotations
         }
+        if not temporal_windows_enabled:
+            prompts = {
+                annotation.annotation_id: compose_prompt(
+                    base_prompts[annotation.annotation_id],
+                    localization_instruction if localization_enabled else None,
+                    response_fields=response_fields,
+                    reasoning_mode=reasoning_mode,
+                )
+                for annotation in annotations
+            }
     except PromptContextError as exc:
         raise DatasetSkippedError(
             f"Dataset {cfg.dataset.name!r} skipped for prompt {prompt_slug!r}: "
@@ -381,12 +536,18 @@ def run_benchmark(
     run_started_at = time.monotonic()
 
     def record_completed(
-        future: Future[str],
-        task: tuple[int, Annotation, int, VideoSample],
+        future: Future[Any],
+        task: tuple[int, Annotation, int, VideoSample, tuple[tuple[float, float], ...]],
     ) -> None:
-        result_index, annotation, seed, video_sample = task
+        result_index, annotation, seed, video_sample, window_intervals = task
         try:
-            raw_response = future.result()
+            result = future.result()
+            if temporal_windows_enabled:
+                raw_response, consistency_retry_count, consistency_retry_error = result
+            else:
+                raw_response = result
+                consistency_retry_count = 0
+                consistency_retry_error = ""
         except Exception as exc:
             logger.error(
                 "vLLM request failed for %s (seed=%s); continuing: %s",
@@ -409,7 +570,12 @@ def run_benchmark(
             parsed_response = parse_response(
                 raw_response,
                 require_localization=localization_enabled,
-                expected_fields=response_fields,
+                expected_fields=(
+                    (*response_fields, "windows")
+                    if temporal_windows_enabled and response_fields is not None
+                    else response_fields
+                ),
+                expected_window_count=(len(window_intervals) if temporal_windows_enabled else None),
             )
             prediction = parsed_response.count if parsed_response is not None else None
             localization_missing = (
@@ -477,6 +643,42 @@ def run_benchmark(
                         predicted_start,
                         predicted_end,
                     )
+                if temporal_windows_enabled:
+                    window_counts = parsed_response.window_counts
+                    row.update(
+                        {
+                            "window_size_seconds": window_seconds,
+                            "window_counts_json": (
+                                json.dumps(
+                                    [
+                                        {
+                                            "start_sec": start,
+                                            "end_sec": end,
+                                            "count": count,
+                                        }
+                                        for (start, end), count in zip(
+                                            window_intervals, window_counts or ()
+                                        )
+                                    ],
+                                    separators=(",", ":"),
+                                )
+                                if window_counts is not None
+                                else None
+                            ),
+                            "window_count_sum": parsed_response.window_count_sum,
+                            "window_count_consistent": parsed_response.window_count_consistent,
+                            "window_consistency_retries": consistency_retry_count,
+                            "window_consistency_retry_error": consistency_retry_error,
+                        }
+                    )
+                    if parsed_response.window_count_consistent is False:
+                        logger.warning(
+                            "Window counts remain inconsistent for %s (seed=%s): total=%s, windows_sum=%s",
+                            annotation.video_name,
+                            seed,
+                            parsed_response.count,
+                            parsed_response.window_count_sum,
+                        )
             if prediction is not None:
                 signed_error = prediction - annotation.gt_count
                 row["signed_error"] = signed_error
@@ -497,7 +699,8 @@ def run_benchmark(
     ) as progress:
         with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
             pending: dict[
-                Future[str], tuple[int, Annotation, int, VideoSample]
+                Future[Any],
+                tuple[int, Annotation, int, VideoSample, tuple[tuple[float, float], ...]],
             ] = {}
 
             def drain_completed() -> None:
@@ -530,26 +733,64 @@ def run_benchmark(
                         )
                         progress.update()
                 else:
+                    window_intervals = (
+                        build_temporal_windows(video_sample.duration, window_seconds)
+                        if temporal_windows_enabled
+                        else ()
+                    )
+                    if temporal_windows_enabled:
+                        request_prompt = compose_prompt(
+                            base_prompts[annotation.annotation_id],
+                            localization_instruction if localization_enabled else None,
+                            response_fields=response_fields,
+                            window_intervals=window_intervals,
+                            reasoning_mode=reasoning_mode,
+                        )
+                        expected_fields = (
+                            (*response_fields, "windows")
+                            if response_fields is not None
+                            else None
+                        )
+                    else:
+                        request_prompt = prompts[annotation.annotation_id]
+                        expected_fields = None
                     for seed_index, seed in enumerate(seeds):
                         while len(pending) >= max_concurrent_requests:
                             drain_completed()
                         result_index = annotation_index * len(seeds) + seed_index
-                        future = executor.submit(
-                            _generate_with_retries,
-                            client,
-                            video=video_sample,
-                            prompt=prompts[annotation.annotation_id],
-                            seed=seed,
-                            temperature=temperature,
-                            max_tokens=int(cfg.generation.max_tokens),
-                            max_retries=max_retries,
-                            retry_backoff_seconds=retry_backoff_seconds,
-                        )
+                        if temporal_windows_enabled:
+                            future = executor.submit(
+                                _generate_with_window_consistency,
+                                client,
+                                video=video_sample,
+                                prompt=request_prompt,
+                                seed=seed,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                                max_retries=max_retries,
+                                retry_backoff_seconds=retry_backoff_seconds,
+                                expected_fields=expected_fields,
+                                expected_window_count=len(window_intervals),
+                                consistency_retries=consistency_retries,
+                            )
+                        else:
+                            future = executor.submit(
+                                _generate_with_retries,
+                                client,
+                                video=video_sample,
+                                prompt=request_prompt,
+                                seed=seed,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                                max_retries=max_retries,
+                                retry_backoff_seconds=retry_backoff_seconds,
+                            )
                         pending[future] = (
                             result_index,
                             annotation,
                             seed,
                             video_sample,
+                            window_intervals,
                         )
 
                 remaining_video_uses[annotation.video_path] -= 1

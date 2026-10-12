@@ -1,4 +1,4 @@
-name: InternVL3-9B
-slug: internvl3-9b
-hf_id: OpenGVLab/InternVL3-9B
-served_name: internvl3-9b
+name: InternVL3-9B # Display name recorded in benchmark outputs.
+slug: internvl3-9b # Stable model identifier used in result paths.
+hf_id: OpenGVLab/InternVL3-9B # Hugging Face model ID.
+served_name: internvl3-9b # Model name the running vLLM server exposes to API requests.

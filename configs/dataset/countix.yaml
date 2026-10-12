@@ -1,4 +1,4 @@
-name: Countix
-slug: countix
-folder: Countix
-annotation_prefix: Countix
+name: Countix # Display name used in logs and CSV outputs.
+slug: countix # Stable dataset identifier used in result paths.
+folder: Countix # Directory under data/ containing this dataset.
+annotation_prefix: Countix # Prefix used to discover the annotation CSV for the selected split.

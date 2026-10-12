@@ -1,4 +1,4 @@
-name: RepCount
-slug: repcount
-folder: RepCount
-annotation_prefix: repcount
+name: RepCount # Display name used in logs and CSV outputs.
+slug: repcount # Stable dataset identifier used in result paths.
+folder: RepCount # Directory under data/ containing this dataset.
+annotation_prefix: repcount # Prefix used to discover the annotation CSV for the selected split.

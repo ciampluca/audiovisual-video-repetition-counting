@@ -1,3 +1,3 @@
-name: Count Repetitions
-slug: count-repetitions
-text: 'Watch the full video and identify the main recurring action yourself. Count its complete repetitions.'
+name: Count Repetitions # Display name recorded in results.
+slug: count-repetitions # Stable prompt identifier used in result paths.
+text: 'Watch the full video and identify the main recurring action yourself. Count its complete repetitions.' # Count the main recurring action without annotation text context.

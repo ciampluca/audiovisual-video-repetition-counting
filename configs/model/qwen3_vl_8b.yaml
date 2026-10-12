@@ -1,4 +1,4 @@
-name: Qwen3-VL-8B-Instruct
-slug: qwen3-vl-8b
-hf_id: Qwen/Qwen3-VL-8B-Instruct
-served_name: qwen3-vl-8b
+name: Qwen3-VL-8B-Instruct # Display name recorded in benchmark outputs.
+slug: qwen3-vl-8b # Stable model identifier used in result paths.
+hf_id: Qwen/Qwen3-VL-8B-Instruct # Hugging Face model ID; used by training and for reference.
+served_name: qwen3-vl-8b # Model name the running vLLM server exposes to API requests.

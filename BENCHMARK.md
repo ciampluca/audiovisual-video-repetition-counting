@@ -35,12 +35,12 @@ python -m pip install -e ".[train]"
 
 The initial experiment trains one 4-bit LoRA adapter on the official Countix
 `train` split using the fixed predominant-action prompt and count-only JSON
-targets. It does not select validation/test data or pass annotation class,
-description, audio, or repetition intervals to the model. The default uses
-language-backbone attention LoRA (rank 16), gradient checkpointing, one video
-per micro-batch, and up to 32 frames sampled at 1 FPS. The vision tower remains
-frozen. It is configured for one CUDA GPU; adjust frame count or accumulation
-steps to fit available memory.
+targets. It does not use validation/test examples for training or pass
+annotation class, description, audio, or repetition intervals to the model.
+The default uses language-backbone attention LoRA (rank 16), gradient
+checkpointing, one video per micro-batch, and samples at 10 FPS up to a cap of
+3000 frames. The vision tower remains frozen. It is configured for one CUDA
+GPU; adjust frame count or accumulation steps to fit available memory.
 
 Start training from the repository root:
 
@@ -99,11 +99,87 @@ the server running while evaluating datasets, prompt variants, or FPS settings
 for that model. Use --max-model-len 8192 to occupy less memory. 
 Use --media-io-kwargs '{"video": {"num_frames": -1}}' to overcome num-frames limitations.
 
+## Configuration
+
+The benchmark uses Hydra configuration groups. The default choices are
+`dataset=countix`, `model=qwen3_vl_8b`, `prompt=count_repetitions`, and
+`localization=global_sequence`. Available choices are:
+
+- `dataset`: `countix`, `repcount`, `ucfrep`, `ovr_kinetics`, `ovr_ego4d`.
+- `model`: `qwen3_vl_8b`, `llava_onevision_7b`, `internvl3_9b`. Each profile
+  defines the Hugging Face ID, result-path slug, and vLLM served name.
+- `prompt`: `count_repetitions`, `count_motion_pattern`,
+  `count_action_specific_repetitions`, `count_class_action`,
+  `count_description_action`. Class- and description-conditioned prompts
+  require a known, non-empty matching annotation value for every selected row.
+- `localization`: `none` or `global_sequence`. The default predicts one
+  interval covering the overall repeated-action sequence; use `none` for
+  count-only output.
+
+Override scalar and list options directly on the command line. Core options
+include:
+
+- `benchmark.seeds`: list of inference seeds (default `[13, 17, 23, 42, 99]`).
+- `sampling.fps` and `sampling.max_frames`: requested sampling rate and frame
+  cap (defaults `10.0` and `3000`). If the requested rate exceeds the cap, the
+  sampler uniformly subsamples the sampled timeline.
+- `generation.temperature`, `generation.max_tokens`, and
+  `generation.response_fields`: temperature (`0.2`), token limit (`128`), and
+  JSON fields. Supported response fields are `count`, `action_description`,
+  and `reasoning`; `count` is required. The default is count only.
+- `generation.reasoning_mode`: `none` (default, unchanged legacy prompt) or
+  `step_by_step` (a structured count procedure with a concise evidence-based
+  `reasoning` field). It applies across prompt choices and composes with
+  temporal windows; the output field is added automatically.
+- `runtime.base_url`, `runtime.api_key`, `runtime.timeout_seconds`,
+  `runtime.max_retries`, `runtime.retry_backoff_seconds`, and
+  `runtime.max_concurrent_requests`: OpenAI-compatible endpoint and request
+  behavior. The concurrency default is **8**; lower it to limit resource use.
+- `paths.workspace_root` and `paths.output_root`: project and results roots.
+
+Enable temporal-window counting with:
+
+```bash
+video-repetition-benchmark generation.temporal_windows.enabled=true generation.temporal_windows.window_seconds=5.0
+```
+
+The mode is disabled by default. When enabled, the prompt requests an overall
+count plus counts for consecutive duration-based windows (the final window may
+be shorter); the runner adds the `windows` response field automatically, so it
+does not belong in `generation.response_fields`. The model receives no ground
+truth counts. If a valid response's window counts do not sum to its overall
+count, the runner may issue one correction request by default
+(`generation.temporal_windows.consistency_retries=1`). A still-inconsistent
+response is retained and marked inconsistent rather than having its total
+rewritten. Malformed responses are handled by the normal parse-error path.
+
+Enable the step-by-step reasoning variant independently of temporal windows:
+
+```bash
+video-repetition-benchmark generation.reasoning_mode=step_by_step
+```
+
+It asks the model to identify the target action, define a complete cycle from
+visible motion, count cycles chronologically without extrapolating, and check
+the count. It adds `reasoning` to the requested JSON fields even when
+`generation.response_fields=[count]`; the field is a concise model-produced
+rationale, not a guarantee of faithful internal reasoning. The same option can
+be combined with windows by enabling both settings. Step-by-step mode raises
+the effective token budget to at least 256 (or keeps a higher configured
+`generation.max_tokens`).
+
+Other useful overrides include `generation.temperature=0`,
+`runtime.max_concurrent_requests=1`, or selecting a count-only run with
+`localization=none`. Hydra run directories, `hydra.run.dir` and
+`hydra.job.chdir`, can also be overridden. All fields and their defaults are
+annotated in the corresponding YAML files under `configs/`.
+
 ## Run
 
 From the repository root, the default run uses Countix test annotations, the
-default Qwen3-VL-8B model, the default prompt, 1 sampled frame per second,
-temperature 0.2, and five seeds:
+default Qwen3-VL-8B model, the default prompt and global-sequence localization,
+10 sampled frames per second, temperature 0.2, and five seeds. The request
+concurrency default is 8:
 
 ```bash
 video-repetition-benchmark
@@ -155,9 +231,9 @@ It predicts one interval for the full sequence, not individual-cycle boundaries.
 Normalized start/end positions are converted to seconds using the video duration.
 Predictions and per-seed metrics include temporal IoU and boundary errors.
 Missing or malformed localization does not invalidate an otherwise valid count
-prediction. Localization is disabled by default; count-only runs preserve their
-existing output path, while localized runs use a distinct prompt ID such as
-`count-repetitions+global-sequence`.
+prediction. Global-sequence localization is enabled by default. Select
+`localization=none` for count-only output; localized runs use a distinct prompt
+ID such as `count-repetitions+global-sequence`.
 
 Run a dataset/prompt/FPS sweep against the model currently loaded by vLLM:
 
@@ -174,8 +250,8 @@ temperature (including `0`), frame cap, endpoint, retry count, and output root
 through Hydra overrides, for example
 `benchmark.seeds='[13,17,23,42,99]' generation.temperature=0 sampling.max_frames=128`.
 Inference requests run concurrently, up to `runtime.max_concurrent_requests`
-(default: 2). Lower this value if GPU or system memory is constrained, or set it
-to `1` to run requests sequentially.
+(default: 8). Lower this value if GPU or system memory is constrained, or set
+it to `1` to run requests sequentially.
 
 The sampler decodes frames from the video stream only (`-map 0:v:0`), never
 reads or transmits audio, and sends the sampled sequence using vLLM's
@@ -193,7 +269,10 @@ other four datasets use test.
 
 ## Results
 
-Outputs omit split directories; split is recorded in both files:
+Outputs omit split directories; split is recorded in both files. Localization
+is enabled by default and adds `+global-sequence` to the prompt identifier;
+`localization=none` keeps count-only outputs under the prompt identifier without
+that suffix:
 
 ```text
 results/{dataset}/{model}/video-only/{prompt}/fps-{fps}/temperature-{temperature}/
@@ -203,11 +282,15 @@ results/{dataset}/{model}/video-only/{prompt}/fps-{fps}/temperature-{temperature
 
 `predictions.csv` contains one record per annotation row and seed, including the
 source `class_name` and `description` when present, raw response, parsed count,
-action description, concise motion reasoning, signed/absolute/relative error,
-FPS, temperature, status, and separate `prompt_id` and `localization_id` fields.
+any requested action description or concise motion reasoning,
+signed/absolute/relative error, FPS, temperature, status, and separate
+`prompt_id`, `reasoning_mode`, and `localization_id` fields. Step-by-step runs
+use a distinct prompt identity; window duration and non-default response-field
+schemas are also included in the result identity to avoid overwrites.
 When `localization=global_sequence`, it also includes GT and predicted sequence
 intervals, normalized predictions, temporal IoU, and start/end boundary errors
-in seconds.
+in seconds. With temporal windows enabled, it includes per-window predictions
+and the window-sum consistency result.
 
 - `mae_percent`: the *Every Shot Counts* MAE, computed as the mean per-row
   absolute error divided by that row's positive ground-truth count, expressed
@@ -225,11 +308,14 @@ in seconds.
 - `start_mae_sec`, `end_mae_sec`, and `boundary_mae_sec`: absolute boundary
   errors in seconds for valid localization predictions.
 
-The count prompts return exactly one JSON object with `count` (a non-negative
-integer), `action_description` (a short description), and `reasoning` (one
-concise sentence grounded in visible motion). The localization prompt additionally
-returns `sequence_start_fraction` and `sequence_end_fraction` in `[0, 1]`. Invalid
-JSON or fields are retained with a parse-error status and excluded from the
+The default count response is one JSON object with `count` (a non-negative
+integer). `action_description` (a short description) and `reasoning` (one
+concise sentence grounded in visible motion) can be requested through
+`generation.response_fields`; step-by-step mode automatically requests its
+structured `reasoning` summary. The localization prompt additionally returns
+`sequence_start_fraction` and `sequence_end_fraction` in `[0, 1]`. Temporal
+window mode additionally requests the per-window `windows` field. Invalid JSON
+or fields are retained with a parse-error status and excluded from the
 corresponding aggregate metrics; the raw response remains in `predictions.csv`.
 Missing or unreadable videos are retained as error rows.
 Transient vLLM failures (connection/timeouts, HTTP 429, and HTTP 5xx) are retried
@@ -238,9 +324,29 @@ the failed row is recorded and the benchmark continues. `run_status` is
 `complete_with_errors` if any prediction row is not `ok`; inspect `status` and
 `error_message` in `predictions.csv` for details.
 
-`generation.max_tokens` limits generated output tokens, not video frames. The
-default of 128 leaves room for the structured response and can be adjusted with
-a Hydra override if needed.
+`generation.max_tokens` limits generated output tokens, not video frames. Its
+default is 128. Temporal-window mode raises the effective budget to accommodate
+the window list; step-by-step mode uses at least 256 tokens for its structured
+rationale.
+
+## LoRA Configuration
+
+`configs/train_lora.yaml` controls the optional Qwen3-VL trainer. Its dataset
+and prompt are Hydra groups; the trainer currently requires the Qwen3-VL-8B
+profile, a `train` split, and a `val` validation split. `data.sampling_fps`,
+`data.max_frames`, and `data.max_train_samples` set video sampling and the
+optional training-row limit. The `lora` group sets rank, alpha, dropout, and a
+regex restricted to language-backbone attention projections.
+
+The `training` group configures response fields (`count` and optionally
+`action_description`), action-description context source, seed, epochs or
+maximum steps, gradient accumulation, optimizer hyperparameters, logging and
+checkpoint retention, precision, gradient checkpointing, 4-bit quantization,
+and optional checkpoint resume. Validation generation has its own
+`validation.max_new_tokens` limit. Training saves the final adapter and
+processor to `paths.output_dir`, validation history and best-NMAE/best-OBO
+adapters alongside it. Every field and its default is documented inline in
+`configs/train_lora.yaml`.
 
 ## Tests
 

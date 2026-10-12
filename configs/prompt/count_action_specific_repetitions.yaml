@@ -1,5 +1,6 @@
-name: Count Action-Specific Repetitions
-slug: count-action-specific-repetitions
+name: Count Action-Specific Repetitions # Display name recorded in results.
+slug: count-action-specific-repetitions # Stable prompt identifier used in result paths.
+# Asks the model to define one complete repetition for the action it observes.
 text: >-
   Watch the full video and identify the main repeated action. Determine what
   counts as one repetition for that specific action, then apply that definition

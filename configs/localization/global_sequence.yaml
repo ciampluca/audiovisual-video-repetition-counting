@@ -1,4 +1,4 @@
-name: Global Sequence Localization
-slug: global-sequence
-enabled: true
-instruction: 'Also locate the single overall interval containing the full sequence of the same target action counted above. Start at the onset of its first repetition and end when its last repetition finishes. Include pauses between repetitions that belong to the sequence, but exclude unrelated activity before or after it. Do not return separate intervals for individual repetitions. Estimate both boundaries as fractions of the full video timeline, where 0.0 is the beginning and 1.0 is the end.'
+name: Global Sequence Localization # Display name recorded in results.
+slug: global-sequence # Suffix used to separate localized results from count-only runs.
+enabled: true # Predict one interval spanning the whole repeated-action sequence.
+instruction: 'Also locate the single overall interval containing the full sequence of the same target action counted above. Start at the onset of its first repetition and end when its last repetition finishes. Include pauses between repetitions that belong to the sequence, but exclude unrelated activity before or after it. Do not return separate intervals for individual repetitions. Estimate both boundaries as fractions of the full video timeline, where 0.0 is the beginning and 1.0 is the end.' # Adds sequence_start_fraction and sequence_end_fraction to the requested JSON fields.
